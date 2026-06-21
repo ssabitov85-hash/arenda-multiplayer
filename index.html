@@ -345,15 +345,12 @@
 
 <script>
 // ============================================================
-// 1. МУЛЬТИПЛЕЕРНАЯ СИСТЕМА (WebSocket через Vercel)
+// 1. МУЛЬТИПЛЕЕРНАЯ СИСТЕМА (WebSocket)
 // ============================================================
 
-// === КОНФИГУРАЦИЯ ===
-// Для локальной разработки используем localhost:3000
-// Для продакшена — разверните backend на Vercel и укажите URL
-const WS_URL = window.location.hostname === 'localhost' 
-    ? 'ws://localhost:3000' 
-    : `wss://${window.location.hostname}/api`;
+// === ПОДКЛЮЧЕНИЕ К ВАШЕМУ СЕРВЕРУ НА RENDER ===
+// ИСПРАВЛЕНО: используем wss:// и текущий хост
+const WS_URL = `wss://${window.location.hostname}`;
 
 // === СОСТОЯНИЕ МУЛЬТИПЛЕЕРА ===
 let ws = null;
@@ -544,7 +541,6 @@ document.getElementById('btn-connect').addEventListener('click', async () => {
 
 document.getElementById('join-code-input').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') document.getElementById('btn-connect').click();
-    // Автоматический переход по полям
     if (e.target.value.length >= 6 && e.key !== 'Backspace') {
         e.preventDefault();
     }
@@ -1240,7 +1236,12 @@ function createPlayerModel(color = 0x44aaff, name = '') {
         canvas.height = 64;
         const ctx = canvas.getContext('2d');
         ctx.fillStyle = 'rgba(0,0,0,0.5)';
-        ctx.roundRect(10, 10, 236, 44, 10);
+        // Используем roundRect если доступен
+        if (ctx.roundRect) {
+            ctx.roundRect(10, 10, 236, 44, 10);
+        } else {
+            ctx.rect(10, 10, 236, 44);
+        }
         ctx.fill();
         ctx.fillStyle = '#ffffff';
         ctx.font = 'bold 32px "Courier New"';
@@ -1378,16 +1379,21 @@ function setupMobileControls() {
         moveState.w = false; moveState.s = false; moveState.a = false; moveState.d = false;
     }, { passive: false });
     
+    // Для обзора на мобильных
+    let touchLookActive = false;
+    let touchLookStartX = 0, touchLookStartY = 0;
+    
     lookArea.addEventListener('touchstart', (e) => {
         e.preventDefault();
         if (!gameActive) return;
         const touch = e.touches[0];
         touchLookStartX = touch.clientX; touchLookStartY = touch.clientY;
+        touchLookActive = true;
     }, { passive: false });
     
     lookArea.addEventListener('touchmove', (e) => {
         e.preventDefault();
-        if (!gameActive) return;
+        if (!touchLookActive || !gameActive) return;
         const touch = e.touches[0];
         const dx = touch.clientX - touchLookStartX;
         const dy = touch.clientY - touchLookStartY;
@@ -1400,7 +1406,10 @@ function setupMobileControls() {
         touchLookStartY = touch.clientY;
     }, { passive: false });
     
-    lookArea.addEventListener('touchend', (e) => { e.preventDefault(); }, { passive: false });
+    lookArea.addEventListener('touchend', (e) => { 
+        e.preventDefault();
+        touchLookActive = false; 
+    }, { passive: false });
     
     touchInteractBtn.addEventListener('touchstart', (e) => {
         e.preventDefault();
@@ -2144,274 +2153,8 @@ if (isMobile) {
     document.getElementById('interaction-hint').style.display = 'none';
 }
 
-// Обновление CanvasRenderingContext2D.roundRect для старых браузеров
-if (!CanvasRenderingContext2D.prototype.roundRect) {
-    CanvasRenderingContext2D.prototype.roundRect = function(x, y, w, h, r) {
-        if (r > w/2) r = w/2;
-        if (r > h/2) r = h/2;
-        this.moveTo(x + r, y);
-        this.lineTo(x + w - r, y);
-        this.quadraticCurveTo(x + w, y, x + w, y + r);
-        this.lineTo(x + w, y + h - r);
-        this.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
-        this.lineTo(x + r, y + h);
-        this.quadraticCurveTo(x, y + h, x, y + h - r);
-        this.lineTo(x, y + r);
-        this.quadraticCurveTo(x, y, x + r, y);
-        return this;
-    };
-}
-
-// ============================================================
-// 14. БЭКЕНД НА VERCEL (server.js)
-// ============================================================
-/*
-Для работы мультиплеера нужно создать файл api/server.js в папке api:
-
-```javascript
-// api/server.js
-const WebSocket = require('ws');
-
-const rooms = {};
-const clients = new Map();
-
-function generateId() {
-    return Math.random().toString(36).substring(2, 8);
-}
-
-function getPlayerColors() {
-    const colors = [0x44aaff, 0xff6644, 0x44ff88, 0xff44ff, 0xffdd44, 0x88ddff];
-    return colors[Math.floor(Math.random() * colors.length)];
-}
-
-module.exports = (req, res) => {
-    if (req.method === 'GET') {
-        res.status(200).send('WebSocket server is running');
-        return;
-    }
-};
-
-// Для Vercel используем serverless WebSocket
-// В production лучше использовать отдельный WebSocket сервер
-// Но для демонстрации оставляем заглушку
-
-// Экспортируем для Vercel
-module.exports.ws = (ws, req) => {
-    let playerId = null;
-    let roomCode = null;
-    
-    ws.on('message', (message) => {
-        try {
-            const data = JSON.parse(message);
-            
-            switch(data.type) {
-                case 'create_room': {
-                    const code = data.roomCode || String(Math.floor(100000 + Math.random() * 900000));
-                    roomCode = code;
-                    playerId = generateId();
-                    
-                    if (!rooms[code]) {
-                        rooms[code] = {
-                            players: [],
-                            gameStarted: false,
-                            lightOn: true,
-                            gameOver: false,
-                            code: code
-                        };
-                    }
-                    
-                    const player = {
-                        id: playerId,
-                        name: data.playerName || 'Игрок',
-                        position: { x: 0, y: 5, z: 0 },
-                        rotation: { pitch: 0, yaw: 0 },
-                        alive: true,
-                        color: getPlayerColors(),
-                        isHost: rooms[code].players.length === 0
-                    };
-                    
-                    rooms[code].players.push(player);
-                    clients.set(playerId, { ws, roomCode });
-                    
-                    ws.send(JSON.stringify({
-                        type: 'room_created',
-                        roomCode: code,
-                        playerId: playerId,
-                        players: rooms[code].players
-                    }));
-                    
-                    broadcastToRoom(code, {
-                        type: 'player_joined',
-                        players: rooms[code].players
-                    }, playerId);
-                    break;
-                }
-                
-                case 'join_room': {
-                    const code = data.roomCode;
-                    if (!rooms[code]) {
-                        ws.send(JSON.stringify({ type: 'error', message: 'Лобби не найдено' }));
-                        return;
-                    }
-                    
-                    if (rooms[code].gameStarted) {
-                        ws.send(JSON.stringify({ type: 'error', message: 'Игра уже началась' }));
-                        return;
-                    }
-                    
-                    roomCode = code;
-                    playerId = generateId();
-                    
-                    const player = {
-                        id: playerId,
-                        name: data.playerName || 'Игрок',
-                        position: { x: 0, y: 5, z: 0 },
-                        rotation: { pitch: 0, yaw: 0 },
-                        alive: true,
-                        color: getPlayerColors(),
-                        isHost: false
-                    };
-                    
-                    rooms[code].players.push(player);
-                    clients.set(playerId, { ws, roomCode });
-                    
-                    ws.send(JSON.stringify({
-                        type: 'room_joined',
-                        roomCode: code,
-                        playerId: playerId,
-                        players: rooms[code].players
-                    }));
-                    
-                    broadcastToRoom(code, {
-                        type: 'player_joined',
-                        players: rooms[code].players
-                    }, playerId);
-                    break;
-                }
-                
-                case 'start_game': {
-                    if (rooms[roomCode] && rooms[roomCode].players.length >= 2) {
-                        rooms[roomCode].gameStarted = true;
-                        broadcastToRoom(roomCode, {
-                            type: 'game_start',
-                            players: rooms[roomCode].players
-                        });
-                    }
-                    break;
-                }
-                
-                case 'player_update': {
-                    if (rooms[roomCode]) {
-                        const p = rooms[roomCode].players.find(p => p.id === playerId);
-                        if (p) {
-                            p.position = data.position;
-                            p.rotation = data.rotation;
-                        }
-                        broadcastToRoom(roomCode, {
-                            type: 'player_update',
-                            players: rooms[roomCode].players
-                        }, playerId);
-                    }
-                    break;
-                }
-                
-                case 'player_died': {
-                    if (rooms[roomCode]) {
-                        const p = rooms[roomCode].players.find(p => p.id === playerId);
-                        if (p) p.alive = false;
-                        
-                        const aliveCount = rooms[roomCode].players.filter(p => p.alive).length;
-                        if (aliveCount <= 1) {
-                            const winner = rooms[roomCode].players.find(p => p.alive);
-                            broadcastToRoom(roomCode, {
-                                type: 'game_over',
-                                winner: winner ? winner.id : null,
-                                winnerName: winner ? winner.name : null,
-                                players: rooms[roomCode].players
-                            });
-                        } else {
-                            broadcastToRoom(roomCode, {
-                                type: 'player_died',
-                                playerId: playerId,
-                                playerName: p ? p.name : null,
-                                players: rooms[roomCode].players
-                            });
-                        }
-                    }
-                    break;
-                }
-                
-                case 'light_toggle': {
-                    if (rooms[roomCode]) {
-                        rooms[roomCode].lightOn = data.isOn;
-                        broadcastToRoom(roomCode, {
-                            type: 'light_toggle',
-                            isOn: data.isOn
-                        });
-                    }
-                    break;
-                }
-                
-                case 'restart_game': {
-                    if (rooms[roomCode]) {
-                        rooms[roomCode].gameStarted = false;
-                        rooms[roomCode].gameOver = false;
-                        rooms[roomCode].players.forEach(p => {
-                            p.alive = true;
-                            p.position = { x: 0, y: 5, z: 0 };
-                        });
-                        broadcastToRoom(roomCode, {
-                            type: 'game_restarted',
-                            players: rooms[roomCode].players
-                        });
-                    }
-                    break;
-                }
-                
-                case 'leave_room': {
-                    leaveRoom();
-                    break;
-                }
-            }
-        } catch(e) {
-            console.error('Error processing message:', e);
-        }
-    });
-    
-    ws.on('close', () => {
-        leaveRoom();
-    });
-    
-    function leaveRoom() {
-        if (roomCode && rooms[roomCode]) {
-            rooms[roomCode].players = rooms[roomCode].players.filter(p => p.id !== playerId);
-            broadcastToRoom(roomCode, {
-                type: 'player_left',
-                players: rooms[roomCode].players
-            });
-            
-            if (rooms[roomCode].players.length === 0) {
-                delete rooms[roomCode];
-            }
-        }
-        if (playerId) {
-            clients.delete(playerId);
-        }
-        playerId = null;
-        roomCode = null;
-    }
-    
-    function broadcastToRoom(roomCode, data, excludeId) {
-        const room = rooms[roomCode];
-        if (!room) return;
-        
-        room.players.forEach(p => {
-            if (p.id !== excludeId) {
-                const client = clients.get(p.id);
-                if (client && client.ws.readyState === WebSocket.OPEN) {
-                    client.ws.send(JSON.stringify(data));
-                }
-            }
-        });
-    }
-};
+console.log('🎮 Мультиплеерная версия "Аренда"');
+console.log(`📡 Подключение к WebSocket: ${WS_URL}`);
+</script>
+</body>
+</html>
