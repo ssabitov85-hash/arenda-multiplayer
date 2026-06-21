@@ -590,13 +590,17 @@ function showLobbyScreen() {
 function updateLobbyUI(players) {
     playersInRoom = players || [];
     const count = playersInRoom.length;
-    document.getElementById('player-count').textContent = count;
     
+    // Сначала генерируем строку с именами
     const names = playersInRoom.map(p => p.name || 'Игрок').join(', ');
-    document.getElementById('players-list').innerHTML = `Игроки: <span>${names || '...'}</span>`;
     
+    // Перезаписываем список игроков, но сохраняем внутри тег с id="player-count"
+    document.getElementById('players-list').innerHTML = `Игроки: (${count}) <span id="player-count" style="color: #fff; margin: 0 10px;">${names || '...'}</span>`;
+    
+    // Обновляем код комнаты
     document.getElementById('lobby-code-display').textContent = roomCode;
     
+    // Логика кнопки старта
     const startBtn = document.getElementById('btn-start-game');
     if (isHost && count >= 2) {
         startBtn.disabled = false;
@@ -609,7 +613,6 @@ function updateLobbyUI(players) {
         document.getElementById('lobby-status').textContent = `⏳ Ожидание начала игры... (${count} игроков)`;
     }
 }
-
 // Кнопка обновления списка игроков
 document.getElementById('btn-refresh-players').addEventListener('click', () => {
     if (ws && ws.readyState === WebSocket.OPEN) {
