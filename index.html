@@ -10,6 +10,59 @@
         
         #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 10; }
         #crosshair { width: 4px; height: 4px; background-color: rgba(255, 255, 255, 0.7); border-radius: 50%; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); }
+
+/* Запрещаем масштабирование на мобильных */
+* {
+    touch-action: manipulation;
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+}
+
+/* Принудительно fullscreen на мобильных в горизонтальной ориентации */
+@media (orientation: landscape) and (max-width: 1024px) {
+    body, html {
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+    }
+    #start-screen, #lobby-screen, #join-screen {
+        width: 100vw;
+        height: 100vh;
+        height: calc(var(--vh, 1vh) * 100);
+    }
+}
+
+/* Запрет приближения на iOS */
+@supports (-webkit-touch-callout: none) {
+    body, html {
+        -webkit-text-size-adjust: 100%;
+        -webkit-tap-highlight-color: transparent;
+    }
+}
+
+/* Скрываем scrollbars */
+::-webkit-scrollbar {
+    display: none;
+}
+
+/* Принудительный fullscreen для мобильных */
+@media (max-width: 1024px) {
+    #start-screen h1 {
+        font-size: 2.5rem;
+        letter-spacing: 5px;
+    }
+    .btn {
+        padding: 12px 30px;
+        font-size: 1rem;
+        min-width: 160px;
+    }
+}        
         
         /* СТИЛЬНОЕ МЕНЮ */
         #start-screen { 
@@ -404,6 +457,8 @@ function handleWebSocketMessage(event) {
                 isHost = true;
                 showLobbyScreen();
                 updateLobbyUI(data.players);
+                // ВАЖНО: хост тоже должен видеть игроков
+                updateRemotePlayers(data.players);
                 break;
                 
             case 'room_joined':
@@ -412,21 +467,28 @@ function handleWebSocketMessage(event) {
                 isHost = false;
                 showLobbyScreen();
                 updateLobbyUI(data.players);
+                // ВАЖНО: подключающийся видит всех
+                updateRemotePlayers(data.players);
                 break;
                 
             case 'player_joined':
                 playersInRoom = data.players;
                 updateLobbyUI(data.players);
+                // ВАЖНО: обновляем модели всех игроков
+                updateRemotePlayers(data.players);
                 break;
                 
             case 'player_left':
                 playersInRoom = data.players;
                 updateLobbyUI(data.players);
+                updateRemotePlayers(data.players);
                 break;
                 
             case 'game_start':
                 gameStarted = true;
                 document.getElementById('lobby-screen').style.display = 'none';
+                // ВАЖНО: передаем всех игроков в игру
+                updateRemotePlayers(data.players);
                 startGame();
                 break;
                 
@@ -1336,6 +1398,50 @@ function setupControls() {
     if (isMobile) setupMobileControls();
 }
 
+// === МОБИЛЬНЫЙ FULLSCREEN И ОРИЕНТАЦИЯ ===
+function handleMobileFullscreen() {
+    if (isMobile) {
+        // Запрос fullscreen при касании
+        document.addEventListener('touchstart', () => {
+            if (document.documentElement.requestFullscreen && 
+                !document.fullscreenElement && 
+                window.screen.orientation && 
+                window.screen.orientation.type.includes('landscape')) {
+                document.documentElement.requestFullscreen().catch(() => {});
+            }
+        }, { passive: true });
+        
+        // Следим за изменением ориентации
+        if (window.screen && window.screen.orientation) {
+            window.screen.orientation.addEventListener('change', () => {
+                if (window.screen.orientation.type.includes('landscape')) {
+                    if (document.documentElement.requestFullscreen) {
+                        document.documentElement.requestFullscreen().catch(() => {});
+                    }
+                }
+            });
+        }
+        
+        // Запрещаем масштабирование жестами
+        document.addEventListener('gesturestart', (e) => e.preventDefault());
+        document.addEventListener('gesturechange', (e) => e.preventDefault());
+        document.addEventListener('gestureend', (e) => e.preventDefault());
+        
+        // Запрещаем двойной тап для зума
+        let lastTouchEnd = 0;
+        document.addEventListener('touchend', (e) => {
+            const now = Date.now();
+            if (now - lastTouchEnd <= 300) {
+                e.preventDefault();
+            }
+            lastTouchEnd = now;
+        }, { passive: false });
+    }
+}
+
+// Вызываем при загрузке
+document.addEventListener('DOMContentLoaded', handleMobileFullscreen);
+    
 function setupMobileControls() {
     const controls = document.getElementById('mobile-controls');
     controls.classList.add('active');
@@ -1771,22 +1877,24 @@ function triggerPowerOutage() {
 // ============================================================
 
 function updateRemotePlayers(players) {
+    console.log('🔄 Обновление игроков:', players);
+    
     // Удаляем старые модели
     for (const id in playerMeshes) {
         if (!players.find(p => p.id === id)) {
-            scene.remove(playerMeshes[id]);
+            if (scene) scene.remove(playerMeshes[id]);
             delete playerMeshes[id];
         }
     }
     
     for (const player of players) {
+        // Пропускаем себя
         if (player.id === myPlayerId) continue;
         
         if (!playerMeshes[player.id]) {
-            // Создаем модель игрока с его цветом
             const color = player.color || 0x44aaff;
             const model = createPlayerModel(color, player.name || 'Игрок');
-            // Делаем модель полупрозрачной, если игрок мертв
+            
             if (!player.alive) {
                 model.children.forEach(child => {
                     if (child.material) {
@@ -1795,26 +1903,29 @@ function updateRemotePlayers(players) {
                     }
                 });
             }
-            scene.add(model);
+            
+            if (scene) scene.add(model);
             playerMeshes[player.id] = model;
+            console.log('✅ Создана модель для:', player.name, player.id);
         }
         
         const model = playerMeshes[player.id];
-        if (player.position) {
-            model.position.set(player.position.x, player.position.y, player.position.z);
-        }
-        if (player.rotation) {
-            model.rotation.set(0, player.rotation.yaw || 0, 0);
-        }
-        
-        // Обновляем прозрачность если игрок умер
-        const isAlive = player.alive !== false;
-        model.children.forEach(child => {
-            if (child.material) {
-                child.material.transparent = true;
-                child.material.opacity = isAlive ? 1 : 0.3;
+        if (model) {
+            if (player.position) {
+                model.position.set(player.position.x, player.position.y, player.position.z);
             }
-        });
+            if (player.rotation) {
+                model.rotation.set(0, player.rotation.yaw || 0, 0);
+            }
+            
+            const isAlive = player.alive !== false;
+            model.children.forEach(child => {
+                if (child.material) {
+                    child.material.transparent = true;
+                    child.material.opacity = isAlive ? 1 : 0.3;
+                }
+            });
+        }
     }
 }
 
@@ -2041,6 +2152,13 @@ async function startGame() {
     gameActive = true;
     clock.start();
     isSpectator = false;
+    
+    // ВАЖНО: синхронизируем игроков при старте
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+            type: 'request_players'
+        }));
+    }
     
     horrorState = {
         phase: 0, tvEvent: false, tvEventTimer: 0, tvWatched: false, tvWatchedTime: 0,
