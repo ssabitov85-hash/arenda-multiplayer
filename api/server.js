@@ -1,15 +1,36 @@
 const WebSocket = require('ws');
 const http = require('http');
+const fs = require('fs');
+const path = require('path');
 
-// Создаем HTTP сервер
+// Создаем HTTP сервер с раздачей статики
 const server = http.createServer((req, res) => {
-    if (req.url === '/') {
-        res.writeHead(200, { 'Content-Type': 'text/html' });
-        res.end('WebSocket server is running');
-        return;
-    }
-    res.writeHead(404);
-    res.end('Not found');
+    // Определяем путь к файлу
+    let filePath = req.url === '/' ? '/index.html' : req.url;
+    filePath = path.join(__dirname, '..', filePath);
+    
+    // Определяем MIME тип
+    const ext = path.extname(filePath);
+    const contentTypes = {
+        '.html': 'text/html',
+        '.png': 'image/png',
+        '.MOV': 'video/quicktime',
+        '.mp4': 'video/mp4',
+        '.css': 'text/css',
+        '.js': 'application/javascript'
+    };
+    
+    fs.readFile(filePath, (err, data) => {
+        if (err) {
+            res.writeHead(404);
+            res.end('Not found');
+            return;
+        }
+        res.writeHead(200, { 
+            'Content-Type': contentTypes[ext] || 'application/octet-stream'
+        });
+        res.end(data);
+    });
 });
 
 // Создаем WebSocket сервер
