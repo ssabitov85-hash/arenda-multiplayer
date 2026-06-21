@@ -1,0 +1,12 @@
+{
+  "name": "arenda-multiplayer",
+  "version": "1.0.0",
+  "description": "Мультиплеерная игра Аренда",
+  "main": "api/server.js",
+  "dependencies": {
+    "ws": "^8.14.2"
+  },
+  "scripts": {
+    "start": "node api/server.js"
+  }
+}
