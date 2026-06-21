@@ -615,7 +615,7 @@ document.getElementById('btn-refresh-players').addEventListener('click', () => {
     if (ws && ws.readyState === WebSocket.OPEN) {
         showEventText('🔄 Обновление списка...', 1);
         ws.send(JSON.stringify({
-            type: 'request_players'
+            type: 'request_players',
             roomCode: roomCode
         }));
     } else {
