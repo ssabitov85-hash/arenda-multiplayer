@@ -616,6 +616,7 @@ document.getElementById('btn-refresh-players').addEventListener('click', () => {
         showEventText('🔄 Обновление списка...', 1);
         ws.send(JSON.stringify({
             type: 'request_players'
+            roomCode: roomCode
         }));
     } else {
         showEventText('❌ Нет соединения с сервером', 2);
@@ -678,7 +679,10 @@ document.getElementById('join-code-input').addEventListener('keydown', (e) => {
 
 document.getElementById('btn-leave-lobby').addEventListener('click', () => {
     if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'leave_room' }));
+        ws.send(JSON.stringify({ 
+            type: 'leave_room',
+            roomCode: roomCode // <--- ДОБАВЛЕНО: передаем код комнаты для корректного выхода
+        }));
         ws.close();
     }
     document.getElementById('lobby-screen').style.display = 'none';
