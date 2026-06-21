@@ -5,11 +5,9 @@ const path = require('path');
 
 // Создаем HTTP сервер с раздачей статики
 const server = http.createServer((req, res) => {
-    // Определяем путь к файлу
     let filePath = req.url === '/' ? '/index.html' : req.url;
     filePath = path.join(__dirname, '..', filePath);
     
-    // Определяем MIME тип
     const ext = path.extname(filePath);
     const contentTypes = {
         '.html': 'text/html',
@@ -96,10 +94,11 @@ wss.on('connection', (ws, req) => {
                         players: rooms[code].players
                     }));
                     
+                    // ИСПРАВЛЕНО: Рассылаем абсолютно всем в комнате, без исключений, чтобы обновить UI у хоста
                     broadcastToRoom(code, {
                         type: 'player_joined',
                         players: rooms[code].players
-                    }, playerId);
+                    });
                     break;
                 }
                 
@@ -138,19 +137,24 @@ wss.on('connection', (ws, req) => {
                         players: rooms[code].players
                     }));
                     
+                    // ИСПРАВЛЕНО: Рассылаем изменения всем участникам лобби
                     broadcastToRoom(code, {
                         type: 'player_joined',
                         players: rooms[code].players
-                    }, playerId);
+                    });
                     break;
                 }
                 
                 case 'request_players': {
-                    if (rooms[roomCode]) {
+                    // Подстраховка: если roomCode в замыкании пуст, берём переданный из фронта
+                    const targetRoom = roomCode || data.roomCode; 
+                    if (targetRoom && rooms[targetRoom]) {
                         ws.send(JSON.stringify({
                             type: 'request_players',
-                            players: rooms[roomCode].players
+                            players: rooms[targetRoom].players
                         }));
+                    } else {
+                        ws.send(JSON.stringify({ type: 'error', message: 'Комната не найдена при обновлении' }));
                     }
                     break;
                 }
@@ -235,7 +239,8 @@ wss.on('connection', (ws, req) => {
                 }
                 
                 case 'leave_room': {
-                    leaveRoom();
+                    const targetRoom = roomCode || data.roomCode;
+                    leaveRoom(targetRoom);
                     break;
                 }
             }
@@ -245,19 +250,21 @@ wss.on('connection', (ws, req) => {
     });
     
     ws.on('close', () => {
-        leaveRoom();
+        leaveRoom(roomCode);
     });
     
-    function leaveRoom() {
-        if (roomCode && rooms[roomCode]) {
-            rooms[roomCode].players = rooms[roomCode].players.filter(p => p.id !== playerId);
-            broadcastToRoom(roomCode, {
+    function leaveRoom(explicitRoomCode) {
+        const activeRoom = explicitRoomCode || roomCode;
+        if (activeRoom && rooms[activeRoom]) {
+            rooms[activeRoom].players = rooms[activeRoom].players.filter(p => p.id !== playerId);
+            
+            broadcastToRoom(activeRoom, {
                 type: 'player_left',
-                players: rooms[roomCode].players
+                players: rooms[activeRoom].players
             });
             
-            if (rooms[roomCode].players.length === 0) {
-                delete rooms[roomCode];
+            if (rooms[activeRoom].players.length === 0) {
+                delete rooms[activeRoom];
             }
         }
         if (playerId) {
