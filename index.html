@@ -5,11 +5,24 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Аренда - Мультиплеер</title>
     <style>
-        body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #000; font-family: 'Courier New', Courier, monospace; user-select: none; touch-action: none; }
-        canvas { display: block; }
-        
-        #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 10; }
-        #crosshair { width: 4px; height: 4px; background-color: rgba(255, 255, 255, 0.7); border-radius: 50%; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); }
+body, html { 
+    margin: 0; 
+    padding: 0; 
+    width: 100%; 
+    height: 100%; 
+    overflow: hidden; 
+    background-color: #000; 
+    font-family: 'Courier New', Courier, monospace; 
+    user-select: none; 
+    touch-action: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+}
+
+canvas { display: block; }
 
 /* Запрещаем масштабирование на мобильных */
 * {
@@ -19,22 +32,56 @@
     user-select: none;
 }
 
-/* Принудительно fullscreen на мобильных в горизонтальной ориентации */
-@media (orientation: landscape) and (max-width: 1024px) {
+/* === ПОЛНОЭКРАННЫЙ РЕЖИМ ДЛЯ МОБИЛЬНЫХ === */
+/* Принудительно fullscreen на мобильных в любой ориентации */
+@media (max-width: 1024px) {
     body, html {
-        width: 100%;
-        height: 100%;
-        overflow: hidden;
         position: fixed;
         top: 0;
         left: 0;
         right: 0;
         bottom: 0;
-    }
-    #start-screen, #lobby-screen, #join-screen {
-        width: 100vw;
-        height: 100vh;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        /* Исправляем проблему с высотой на мобильных */
         height: calc(var(--vh, 1vh) * 100);
+        min-height: -webkit-fill-available;
+    }
+    
+    #start-screen, 
+    #lobby-screen, 
+    #join-screen,
+    #game-over-screen,
+    #win-screen,
+    #pause-screen,
+    #video-scene {
+        width: 100%;
+        height: 100%;
+        height: calc(var(--vh, 1vh) * 100);
+        min-height: -webkit-fill-available;
+        position: fixed;
+        top: 0;
+        left: 0;
+    }
+}
+
+/* Горизонтальная ориентация - еще больше на весь экран */
+@media (orientation: landscape) and (max-width: 1024px) {
+    body, html {
+        width: 100%;
+        height: 100%;
+        height: calc(var(--vh, 1vh) * 100);
+    }
+    
+    #start-screen h1 {
+        font-size: 3rem;
+        letter-spacing: 8px;
+    }
+    
+    .btn {
+        padding: 14px 35px;
+        font-size: 1.1rem;
     }
 }
 
@@ -354,9 +401,10 @@
         <div class="players-list" id="players-list">Игроки: <span id="player-count">1</span></div>
         <div class="status-text" id="lobby-status">Ожидание игроков...</div>
         <div class="lobby-buttons">
-            <button class="btn btn-primary" id="btn-start-game" disabled>▶ Начать игру</button>
-            <button class="btn" id="btn-leave-lobby">✖ Выйти</button>
-        </div>
+    <button class="btn btn-primary" id="btn-start-game" disabled>▶ Начать игру</button>
+    <button class="btn" id="btn-refresh-players">🔄 Обновить список</button>  <!-- НОВАЯ КНОПКА -->
+    <button class="btn" id="btn-leave-lobby">✖ Выйти</button>
+</div>
     </div>
 
     <!-- ЭКРАН ПОДКЛЮЧЕНИЯ -->
@@ -505,6 +553,14 @@ function handleWebSocketMessage(event) {
                 }
                 updateRemotePlayers(data.players);
                 break;
+
+            case 'request_players':
+    // Сервер присылает актуальный список
+    playersInRoom = data.players;
+    updateLobbyUI(data.players);
+    updateRemotePlayers(data.players);
+    showEventText(`👥 В лобби ${data.players.length} игроков`, 1.5);
+    break; 
                 
             case 'game_over':
                 gameStarted = false;
@@ -554,6 +610,18 @@ function updateLobbyUI(players) {
     }
 }
 
+// Кнопка обновления списка игроков
+document.getElementById('btn-refresh-players').addEventListener('click', () => {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        showEventText('🔄 Обновление списка...', 1);
+        ws.send(JSON.stringify({
+            type: 'request_players'
+        }));
+    } else {
+        showEventText('❌ Нет соединения с сервером', 2);
+    }
+});    
+    
 // === СОЗДАНИЕ/ПОДКЛЮЧЕНИЕ ===
 document.getElementById('btn-host').addEventListener('click', async () => {
     try {
@@ -1399,14 +1467,21 @@ function setupControls() {
 }
 
 // === МОБИЛЬНЫЙ FULLSCREEN И ОРИЕНТАЦИЯ ===
+// === МОБИЛЬНЫЙ FULLSCREEN И ОРИЕНТАЦИЯ ===
 function handleMobileFullscreen() {
     if (isMobile) {
-        // Запрос fullscreen при касании
+        // Устанавливаем правильную высоту для мобильных (исправляет проблему с 100vh)
+        function setVH() {
+            const vh = window.innerHeight * 0.01;
+            document.documentElement.style.setProperty('--vh', `${vh}px`);
+        }
+        setVH();
+        window.addEventListener('resize', setVH);
+        
+        // Принудительный fullscreen при касании
         document.addEventListener('touchstart', () => {
             if (document.documentElement.requestFullscreen && 
-                !document.fullscreenElement && 
-                window.screen.orientation && 
-                window.screen.orientation.type.includes('landscape')) {
+                !document.fullscreenElement) {
                 document.documentElement.requestFullscreen().catch(() => {});
             }
         }, { passive: true });
@@ -1414,13 +1489,27 @@ function handleMobileFullscreen() {
         // Следим за изменением ориентации
         if (window.screen && window.screen.orientation) {
             window.screen.orientation.addEventListener('change', () => {
-                if (window.screen.orientation.type.includes('landscape')) {
-                    if (document.documentElement.requestFullscreen) {
-                        document.documentElement.requestFullscreen().catch(() => {});
-                    }
+                setVH();
+                // Пытаемся войти в fullscreen при повороте
+                if (!document.fullscreenElement && 
+                    document.documentElement.requestFullscreen) {
+                    document.documentElement.requestFullscreen().catch(() => {});
                 }
             });
         }
+        
+        // Следим за выходом из fullscreen — возвращаем обратно
+        document.addEventListener('fullscreenchange', () => {
+            if (!document.fullscreenElement && isMobile) {
+                // Пользователь вышел из fullscreen — пробуем вернуть
+                setTimeout(() => {
+                    if (!document.fullscreenElement && 
+                        document.documentElement.requestFullscreen) {
+                        document.documentElement.requestFullscreen().catch(() => {});
+                    }
+                }, 500);
+            }
+        });
         
         // Запрещаем масштабирование жестами
         document.addEventListener('gesturestart', (e) => e.preventDefault());
@@ -1435,6 +1524,16 @@ function handleMobileFullscreen() {
                 e.preventDefault();
             }
             lastTouchEnd = now;
+        }, { passive: false });
+        
+        // Исправляем проблему с прокруткой
+        document.addEventListener('touchmove', (e) => {
+            if (e.target.closest('#touch-joystick-area') || 
+                e.target.closest('#touch-look-area') ||
+                e.target.closest('#touch-interact')) {
+                return;
+            }
+            e.preventDefault();
         }, { passive: false });
     }
 }
