@@ -17,7 +17,8 @@ const server = http.createServer((req, res) => {
         '.MOV': 'video/quicktime',
         '.mp4': 'video/mp4',
         '.css': 'text/css',
-        '.js': 'application/javascript'
+        '.js': 'application/javascript',
+        '.json': 'application/json'
     };
     
     fs.readFile(filePath, (err, data) => {
@@ -141,6 +142,16 @@ wss.on('connection', (ws, req) => {
                         type: 'player_joined',
                         players: rooms[code].players
                     }, playerId);
+                    break;
+                }
+                
+                case 'request_players': {
+                    if (rooms[roomCode]) {
+                        ws.send(JSON.stringify({
+                            type: 'request_players',
+                            players: rooms[roomCode].players
+                        }));
+                    }
                     break;
                 }
                 
