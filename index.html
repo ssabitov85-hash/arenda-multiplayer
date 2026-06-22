@@ -1565,9 +1565,13 @@ function setupMobileControls() {
     joystickKnob = document.getElementById('joystick-knob');
     const lockHint = document.getElementById('mobile-lock-hint');
     
-    // Скрываем зону для поворота (она больше не нужна)
+    // === ВАЖНО: НЕ СКРЫВАЕМ look-area, чтобы он мог принимать касания ===
     const lookArea = document.getElementById('touch-look-area');
-    if (lookArea) lookArea.style.display = 'none';
+    if (lookArea) {
+        lookArea.style.display = 'flex'; // Оставляем видимым
+        lookArea.style.opacity = '0.2';  // Делаем почти прозрачным, чтобы не мешал
+        lookArea.style.pointerEvents = 'auto'; // Обязательно включаем обработку событий
+    }
     
     // === ДЖОЙСТИК ДВИЖЕНИЯ (левая сторона) ===
     let joystickTouchId = null;
@@ -1634,6 +1638,79 @@ function setupMobileControls() {
         moveState.a = touchJoystick.x < -deadZone;
         moveState.d = touchJoystick.x > deadZone;
     }
+    
+    // === ПОВОРОТ КАМЕРЫ (правая половина экрана) ===
+    // Теперь слушаем события на ВСЕМ документе, но проверяем, что касание было справа
+    let lookTouchId = null;
+    let lookStartX = 0, lookStartY = 0;
+    
+    document.addEventListener('touchstart', (e) => {
+        if (!gameActive || isSpectator) return;
+        
+        for (let i = 0; i < e.changedTouches.length; i++) {
+            const touch = e.changedTouches[i];
+            const screenMidX = window.innerWidth / 2;
+            
+            // Если палец справа и не на джойстике и не на кнопке взаимодействия
+            if (touch.clientX > screenMidX && 
+                !touch.target.closest('#touch-joystick-area') &&
+                !touch.target.closest('#touch-interact')) {
+                
+                lookTouchId = touch.identifier;
+                lookStartX = touch.clientX;
+                lookStartY = touch.clientY;
+                return; 
+            }
+        }
+    }, { passive: false }); // ВАЖНО: passive: false, чтобы гарантировать перехват
+    
+    document.addEventListener('touchmove', (e) => {
+        if (!gameActive || isSpectator || lookTouchId === null) return;
+        
+        for (let i = 0; i < e.changedTouches.length; i++) {
+            const touch = e.changedTouches[i];
+            if (touch.identifier === lookTouchId) {
+                const dx = touch.clientX - lookStartX;
+                const dy = touch.clientY - lookStartY;
+                
+                const sensitivity = 0.005;
+                yaw -= dx * sensitivity;
+                pitch -= dy * sensitivity; // Инверсия исправлена
+                
+                pitch = Math.max(-Math.PI/2 + 0.1, Math.min(Math.PI/2 - 0.1, pitch));
+                camera.rotation.set(pitch, yaw, 0, 'YXZ');
+                
+                lookStartX = touch.clientX;
+                lookStartY = touch.clientY;
+                return;
+            }
+        }
+    }, { passive: false }); // ВАЖНО: passive: false
+    
+    document.addEventListener('touchend', (e) => {
+        for (let i = 0; i < e.changedTouches.length; i++) {
+            if (e.changedTouches[i].identifier === lookTouchId) {
+                lookTouchId = null;
+                return;
+            }
+        }
+    });
+    
+    // === КНОПКА ВЗАИМОДЕЙСТВИЯ ===
+    touchInteractBtn.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        if (!gameActive || isSpectator) return;
+        handleInteraction();
+    }, { passive: false });
+    
+    // Запрос блокировки экрана при старте
+    document.addEventListener('touchstart', (e) => {
+        if (gameActive && document.pointerLockElement !== document.body && !isSpectator) {
+            document.body.requestPointerLock();
+            lockHint.style.display = 'none';
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+        }
+    }, { passive: true });
 }
 // ============================================================
 // 7. ИГРОВАЯ ЛОГИКА (с мультиплеерной синхронизацией)
@@ -2381,7 +2458,6 @@ if (isMobile) {
     document.getElementById('interaction-hint').style.display = 'none';
     // Скрываем look-area на мобильных
     const lookArea = document.getElementById('touch-look-area');
-    if (lookArea) lookArea.style.display = 'none';
 }
 
 console.log('🎮 Мультиплеерная версия "Аренда"');
