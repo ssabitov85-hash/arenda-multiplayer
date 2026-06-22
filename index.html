@@ -1334,60 +1334,63 @@ function updateClockTexture(timeStr) {
 function createPlayerModel(color = 0x44aaff, name = '') {
     const group = new THREE.Group();
     
-    // Увеличиваем масштаб всего игрока в 2 раза
-    group.scale.set(1.8, 1.8, 1.8);
+    // Масштаб 0.6 (вместо 1.8) — чтобы игрок был нормального размера в комнате 20x20
+    group.scale.set(0.6, 0.6, 0.6);
     
-    // Тело (туловище) - делаем чуть крупнее
-    const bodyMat = new THREE.MeshStandardMaterial({ color: color, roughness: 0.6, metalness: 0.1 });
+    // ============= ТЕЛО =============
+    // Используем StandardMaterial, чтобы на него падал свет и тени (не будет зелёным!)
+    const bodyMat = new THREE.MeshStandardMaterial({ color: color, roughness: 0.6 });
     const body = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.9, 0.5), bodyMat);
-    body.position.y = 0.9; // Опускаем ниже
+    body.position.y = 1.8; // Поднимаем выше, чтобы стоял на полу (пол на y=0, камера на y=5)
     body.castShadow = true;
+    body.receiveShadow = true;
     group.add(body);
     
-    // Голова
+    // ============= ГОЛОВА =============
     const headMat = new THREE.MeshStandardMaterial({ color: 0xffddbb, roughness: 0.7 });
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.4, 8, 8), headMat);
-    head.position.y = 1.7; // Опускаем ниже
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.35, 12, 12), headMat);
+    head.position.y = 2.65; // Поднимаем голову соответственно
     head.castShadow = true;
+    head.receiveShadow = true;
     group.add(head);
     
-    // Глаза
+    // ============= ГЛАЗА =============
     const eyeMat = new THREE.MeshStandardMaterial({ color: 0xffffff });
-    const pupilMat = new THREE.MeshStandardMaterial({ color: 0x222222 });
+    const pupilMat = new THREE.MeshStandardMaterial({ color: 0x000000 });
     
-    const eyeL = new THREE.Mesh(new THREE.SphereGeometry(0.1, 8, 8), eyeMat);
-    eyeL.position.set(-0.2, 1.75, -0.35);
+    const eyeL = new THREE.Mesh(new THREE.SphereGeometry(0.09, 8, 8), eyeMat);
+    eyeL.position.set(-0.2, 2.7, -0.32);
     group.add(eyeL);
-    const pupilL = new THREE.Mesh(new THREE.SphereGeometry(0.05, 8, 8), pupilMat);
-    pupilL.position.set(-0.2, 1.75, -0.38);
+    const pupilL = new THREE.Mesh(new THREE.SphereGeometry(0.045, 8, 8), pupilMat);
+    pupilL.position.set(-0.2, 2.7, -0.35);
     group.add(pupilL);
     
-    const eyeR = new THREE.Mesh(new THREE.SphereGeometry(0.1, 8, 8), eyeMat);
-    eyeR.position.set(0.2, 1.75, -0.35);
+    const eyeR = new THREE.Mesh(new THREE.SphereGeometry(0.09, 8, 8), eyeMat);
+    eyeR.position.set(0.2, 2.7, -0.32);
     group.add(eyeR);
-    const pupilR = new THREE.Mesh(new THREE.SphereGeometry(0.05, 8, 8), pupilMat);
-    pupilR.position.set(0.2, 1.75, -0.38);
+    const pupilR = new THREE.Mesh(new THREE.SphereGeometry(0.045, 8, 8), pupilMat);
+    pupilR.position.set(0.2, 2.7, -0.35);
     group.add(pupilR);
     
-    // Руки
+    // ============= РУКИ =============
     const armMat = new THREE.MeshStandardMaterial({ color: 0xffddbb, roughness: 0.7 });
     const armL = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.7, 0.15), armMat);
-    armL.position.set(-0.5, 1.0, 0);
+    armL.position.set(-0.5, 1.9, 0);
     group.add(armL);
     const armR = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.7, 0.15), armMat);
-    armR.position.set(0.5, 1.0, 0);
+    armR.position.set(0.5, 1.9, 0);
     group.add(armR);
     
-    // Ноги
-    const legMat = new THREE.MeshStandardMaterial({ color: 0x334466, roughness: 0.7 });
+    // ============= НОГИ =============
+    const legMat = new THREE.MeshStandardMaterial({ color: 0x223355, roughness: 0.7 });
     const legL = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.7, 0.25), legMat);
-    legL.position.set(-0.25, 0.35, 0);
+    legL.position.set(-0.25, 1.25, 0);
     group.add(legL);
     const legR = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.7, 0.25), legMat);
-    legR.position.set(0.25, 0.35, 0);
+    legR.position.set(0.25, 1.25, 0);
     group.add(legR);
     
-    // Имя над головой
+    // ============= ИМЯ =============
     if (name) {
         const canvas = document.createElement('canvas');
         canvas.width = 256;
@@ -1405,7 +1408,7 @@ function createPlayerModel(color = 0x44aaff, name = '') {
         const nameTexture = new THREE.CanvasTexture(canvas);
         const nameMat = new THREE.SpriteMaterial({ map: nameTexture, transparent: true, depthTest: false });
         const nameSprite = new THREE.Sprite(nameMat);
-        nameSprite.position.y = 1.2; // Опускаем табличку с именем
+        nameSprite.position.y = 3.2; // Имя летает над головой
         nameSprite.scale.set(1.5, 0.4, 1);
         group.add(nameSprite);
     }
