@@ -449,8 +449,10 @@ canvas { display: block; }
 // 1. МУЛЬТИПЛЕЕРНАЯ СИСТЕМА (WebSocket)
 // ============================================================
 
+// === ПОДКЛЮЧЕНИЕ К ВАШЕМУ СЕРВЕРУ НА RENDER ===
 const WS_URL = `wss://${window.location.hostname}`;
 
+// === СОСТОЯНИЕ МУЛЬТИПЛЕЕРА ===
 let ws = null;
 let roomCode = '';
 let isHost = false;
@@ -460,8 +462,9 @@ let playersInRoom = [];
 let gameStarted = false;
 let isSpectator = false;
 let lastSendTime = 0;
-const SEND_INTERVAL = 0.05;
+const SEND_INTERVAL = 0.05; // 20 раз в секунду
 
+// === СОЗДАНИЕ ЛОББИ ===
 function generateRoomCode() {
     return String(Math.floor(100000 + Math.random() * 900000));
 }
@@ -528,13 +531,10 @@ function handleWebSocketMessage(event) {
                 break;
                 
             case 'game_start':
-                console.log('🎮 Получена команда game_start');
                 gameStarted = true;
                 document.getElementById('lobby-screen').style.display = 'none';
-                // ВАЖНО: сначала инициализируем сцену, потом запускаем игру
-                init3D(); // Гарантированно создаем сцену
                 updateRemotePlayers(data.players);
-                startGame(); // Запускаем игру
+                startGame(); // ВАЖНО: запускаем у ВСЕХ игроков
                 break;
                 
             case 'player_update':
@@ -557,6 +557,28 @@ function handleWebSocketMessage(event) {
                 updateRemotePlayers(data.players);
                 showEventText(`👥 В лобби ${data.players.length} игроков`, 1.5);
                 break; 
+                
+            // === НОВЫЙ БЛОК ДЛЯ СИНХРОНИЗАЦИИ СВЕТА ===
+            case 'light_toggle':
+                // Синхронизируем свет у всех игроков в комнате
+                if (!isSpectator && gameActive) {
+                    isCeilingLightOn = data.isOn;
+                    if (isCeilingLightOn) {
+                        ceilingPointLight.intensity = 1.5;
+                        ceilingBulbMat.emissive.setHex(0xffcc88);
+                        if(switchRocker) switchRocker.rotation.x = -0.2;
+                        ambientLight.intensity = 0.4;
+                        mainLight.intensity = 0.4;
+                    } else {
+                        ceilingPointLight.intensity = 0;
+                        ceilingBulbMat.emissive.setHex(0x000000);
+                        if(switchRocker) switchRocker.rotation.x = 0.2;
+                        ambientLight.intensity = 0.05;
+                        mainLight.intensity = 0.05;
+                    }
+                }
+                break;
+            // ============================================
                 
             case 'game_over':
                 gameStarted = false;
@@ -606,6 +628,7 @@ function updateLobbyUI(players) {
     }
 }
 
+// Кнопка обновления списка игроков
 document.getElementById('btn-refresh-players').addEventListener('click', () => {
     if (ws && ws.readyState === WebSocket.OPEN) {
         showEventText('🔄 Обновление списка...', 1);
@@ -618,6 +641,7 @@ document.getElementById('btn-refresh-players').addEventListener('click', () => {
     }
 });    
     
+// === СОЗДАНИЕ/ПОДКЛЮЧЕНИЕ ===
 document.getElementById('btn-host').addEventListener('click', async () => {
     try {
         await connectToServer();
@@ -695,7 +719,7 @@ function getPlayerName() {
 }
 
 // ============================================================
-// 2. ГРАФИКА (Three.js)
+// 2. ГРАФИКА (Three.js & Постпроцессинг)
 // ============================================================
 
 let scene, camera, renderer;
@@ -722,8 +746,8 @@ const raycaster = new THREE.Raycaster();
 const centerVector = new THREE.Vector2(0, 0);
 let hoveredObject = null;
 let animationRunning = false;
-let sceneInitialized = false; // ФЛАГ ИНИЦИАЛИЗАЦИИ СЦЕНЫ
 
+// 3D модели игроков
 let playerMeshes = {};
 
 let horrorState = {
@@ -735,6 +759,7 @@ let horrorState = {
     flickerTimer: 0, flickerActive: false, lightFlickerTimer: 0,
 };
 
+// Мобильные переменные
 const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || 
                 (window.innerWidth < 768 && window.innerHeight < 1024) ||
                 ('ontouchstart' in window) ||
@@ -921,48 +946,26 @@ function playClickSound() {
 }
 
 // ============================================================
-// 4. ГРАФИКА (Three.js) - ИНИЦИАЛИЗАЦИЯ
+// 4. ГРАФИКА (Three.js)
 // ============================================================
 
 function init3D() {
-    console.log('🎨 Инициализация 3D сцены...');
-    
-    // Если уже инициализирована - очищаем
     if (renderer) { 
-        console.log('🧹 Очистка старой сцены');
-        try {
-            renderer.domElement.remove(); 
-            renderer.dispose();
-        } catch(e) {}
-        renderer = null;
-        scene = null;
-        camera = null;
+        renderer.domElement.remove(); 
+        renderer.dispose(); 
     }
     
     scene = new THREE.Scene();
     scene.background = new THREE.Color(0x020306);
-    console.log('✅ Сцена создана');
 
     camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 300);
     camera.position.set(0, 5, 0);
-    console.log('✅ Камера создана');
 
-    try {
-        renderer = new THREE.WebGLRenderer({ 
-            antialias: false,
-            powerPreference: "high-performance",
-            failIfMajorPerformanceCaveat: false
-        });
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.shadowMap.enabled = true;
-        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-        document.body.appendChild(renderer.domElement);
-        console.log('✅ Рендерер создан и добавлен в DOM');
-    } catch(e) {
-        console.error('❌ Ошибка создания рендерера:', e);
-        showEventText('❌ Ошибка графики! Попробуйте другой браузер.', 5);
-        return;
-    }
+    renderer = new THREE.WebGLRenderer({ antialias: false });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    document.body.appendChild(renderer.domElement);
 
     renderTarget = new THREE.WebGLRenderTarget(window.innerWidth, window.innerHeight);
     postCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
@@ -1002,15 +1005,10 @@ function init3D() {
 
     buildRoom();
     setupControls();
-    sceneInitialized = true;
-    console.log('✅ 3D сцена полностью инициализирована');
-    
     window.addEventListener('resize', onWindowResize, false);
 }
 
 function buildRoom() {
-    console.log('🏠 Построение комнаты...');
-    
     const wallMat = new THREE.MeshStandardMaterial({ color: 0x4a3f32, roughness: 0.9, side: THREE.BackSide });
     const wallFrontMat = new THREE.MeshStandardMaterial({ color: 0x4a3f32, roughness: 0.9 });
     const invMat = new THREE.MeshBasicMaterial({ visible: false });
@@ -1317,8 +1315,6 @@ function buildRoom() {
     switchMesh.position.set(0, 0, 0.05); switchMesh.userData = { type: 'switch' };
     switchGroup.add(switchMesh);
     switchRocker.rotation.x = 0.2;
-    
-    console.log('✅ Комната построена');
 }
 
 function updateClockTexture(timeStr) {
@@ -1338,62 +1334,67 @@ function updateClockTexture(timeStr) {
 function createPlayerModel(color = 0x44aaff, name = '') {
     const group = new THREE.Group();
     
+    // Увеличиваем масштаб всего игрока в 2 раза
+    group.scale.set(1.8, 1.8, 1.8);
+    
+    // Тело (туловище) - делаем чуть крупнее
     const bodyMat = new THREE.MeshStandardMaterial({ color: color, roughness: 0.6, metalness: 0.1 });
-    const body = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.8, 0.4), bodyMat);
-    body.position.y = 0.9;
+    const body = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.9, 0.5), bodyMat);
+    body.position.y = 0.9; // Опускаем ниже
     body.castShadow = true;
     group.add(body);
     
+    // Голова
     const headMat = new THREE.MeshStandardMaterial({ color: 0xffddbb, roughness: 0.7 });
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.3, 8, 8), headMat);
-    head.position.y = 1.5;
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.4, 8, 8), headMat);
+    head.position.y = 1.7; // Опускаем ниже
     head.castShadow = true;
     group.add(head);
     
+    // Глаза
     const eyeMat = new THREE.MeshStandardMaterial({ color: 0xffffff });
     const pupilMat = new THREE.MeshStandardMaterial({ color: 0x222222 });
     
-    const eyeL = new THREE.Mesh(new THREE.SphereGeometry(0.08, 8, 8), eyeMat);
-    eyeL.position.set(-0.15, 1.55, -0.28);
+    const eyeL = new THREE.Mesh(new THREE.SphereGeometry(0.1, 8, 8), eyeMat);
+    eyeL.position.set(-0.2, 1.75, -0.35);
     group.add(eyeL);
-    const pupilL = new THREE.Mesh(new THREE.SphereGeometry(0.04, 8, 8), pupilMat);
-    pupilL.position.set(-0.15, 1.55, -0.32);
+    const pupilL = new THREE.Mesh(new THREE.SphereGeometry(0.05, 8, 8), pupilMat);
+    pupilL.position.set(-0.2, 1.75, -0.38);
     group.add(pupilL);
     
-    const eyeR = new THREE.Mesh(new THREE.SphereGeometry(0.08, 8, 8), eyeMat);
-    eyeR.position.set(0.15, 1.55, -0.28);
+    const eyeR = new THREE.Mesh(new THREE.SphereGeometry(0.1, 8, 8), eyeMat);
+    eyeR.position.set(0.2, 1.75, -0.35);
     group.add(eyeR);
-    const pupilR = new THREE.Mesh(new THREE.SphereGeometry(0.04, 8, 8), pupilMat);
-    pupilR.position.set(0.15, 1.55, -0.32);
+    const pupilR = new THREE.Mesh(new THREE.SphereGeometry(0.05, 8, 8), pupilMat);
+    pupilR.position.set(0.2, 1.75, -0.38);
     group.add(pupilR);
     
+    // Руки
     const armMat = new THREE.MeshStandardMaterial({ color: 0xffddbb, roughness: 0.7 });
-    const armL = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.6, 0.12), armMat);
-    armL.position.set(-0.4, 1.0, 0);
+    const armL = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.7, 0.15), armMat);
+    armL.position.set(-0.5, 1.0, 0);
     group.add(armL);
-    const armR = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.6, 0.12), armMat);
-    armR.position.set(0.4, 1.0, 0);
+    const armR = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.7, 0.15), armMat);
+    armR.position.set(0.5, 1.0, 0);
     group.add(armR);
     
+    // Ноги
     const legMat = new THREE.MeshStandardMaterial({ color: 0x334466, roughness: 0.7 });
-    const legL = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.6, 0.2), legMat);
-    legL.position.set(-0.2, 0.3, 0);
+    const legL = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.7, 0.25), legMat);
+    legL.position.set(-0.25, 0.35, 0);
     group.add(legL);
-    const legR = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.6, 0.2), legMat);
-    legR.position.set(0.2, 0.3, 0);
+    const legR = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.7, 0.25), legMat);
+    legR.position.set(0.25, 0.35, 0);
     group.add(legR);
     
+    // Имя над головой
     if (name) {
         const canvas = document.createElement('canvas');
         canvas.width = 256;
         canvas.height = 64;
         const ctx = canvas.getContext('2d');
         ctx.fillStyle = 'rgba(0,0,0,0.5)';
-        if (ctx.roundRect) {
-            ctx.roundRect(10, 10, 236, 44, 10);
-        } else {
-            ctx.rect(10, 10, 236, 44);
-        }
+        ctx.roundRect ? ctx.roundRect(10, 10, 236, 44, 10) : ctx.rect(10, 10, 236, 44);
         ctx.fill();
         ctx.fillStyle = '#ffffff';
         ctx.font = 'bold 32px "Courier New"';
@@ -1404,11 +1405,31 @@ function createPlayerModel(color = 0x44aaff, name = '') {
         const nameTexture = new THREE.CanvasTexture(canvas);
         const nameMat = new THREE.SpriteMaterial({ map: nameTexture, transparent: true, depthTest: false });
         const nameSprite = new THREE.Sprite(nameMat);
-        nameSprite.position.y = 2.2;
+        nameSprite.position.y = 1.2; // Опускаем табличку с именем
         nameSprite.scale.set(1.5, 0.4, 1);
         group.add(nameSprite);
     }
     
+    return group;
+}
+
+function createGhostModel(color = 0x44aaff) {
+    const group = new THREE.Group();
+    const ghostMat = new THREE.MeshStandardMaterial({ 
+        color: color, 
+        transparent: true, 
+        opacity: 0.4,
+        emissive: new THREE.Color(color),
+        emissiveIntensity: 0.2,
+        roughness: 0.3
+    });
+    const body = new THREE.Mesh(new THREE.SphereGeometry(0.4, 8, 8), ghostMat);
+    body.position.y = 0.8;
+    body.scale.set(1, 1.2, 0.6);
+    group.add(body);
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.25, 8, 8), ghostMat);
+    head.position.y = 1.3;
+    group.add(head);
     return group;
 }
 
@@ -1468,8 +1489,10 @@ function setupControls() {
     if (isMobile) setupMobileControls();
 }
 
+// === МОБИЛЬНЫЙ FULLSCREEN И ОРИЕНТАЦИЯ ===
 function handleMobileFullscreen() {
     if (isMobile) {
+        // Устанавливаем правильную высоту для мобильных (исправляет проблему с 100vh)
         function setVH() {
             const vh = window.innerHeight * 0.01;
             document.documentElement.style.setProperty('--vh', `${vh}px`);
@@ -1477,6 +1500,7 @@ function handleMobileFullscreen() {
         setVH();
         window.addEventListener('resize', setVH);
         
+        // Принудительный fullscreen при касании
         document.addEventListener('touchstart', () => {
             if (document.documentElement.requestFullscreen && 
                 !document.fullscreenElement) {
@@ -1484,9 +1508,11 @@ function handleMobileFullscreen() {
             }
         }, { passive: true });
         
+        // Следим за изменением ориентации
         if (window.screen && window.screen.orientation) {
             window.screen.orientation.addEventListener('change', () => {
                 setVH();
+                // Пытаемся войти в fullscreen при повороте
                 if (!document.fullscreenElement && 
                     document.documentElement.requestFullscreen) {
                     document.documentElement.requestFullscreen().catch(() => {});
@@ -1494,8 +1520,10 @@ function handleMobileFullscreen() {
             });
         }
         
+        // Следим за выходом из fullscreen — возвращаем обратно
         document.addEventListener('fullscreenchange', () => {
             if (!document.fullscreenElement && isMobile) {
+                // Пользователь вышел из fullscreen — пробуем вернуть
                 setTimeout(() => {
                     if (!document.fullscreenElement && 
                         document.documentElement.requestFullscreen) {
@@ -1505,10 +1533,12 @@ function handleMobileFullscreen() {
             }
         });
         
+        // Запрещаем масштабирование жестами
         document.addEventListener('gesturestart', (e) => e.preventDefault());
         document.addEventListener('gesturechange', (e) => e.preventDefault());
         document.addEventListener('gestureend', (e) => e.preventDefault());
         
+        // Запрещаем двойной тап для зума
         let lastTouchEnd = 0;
         document.addEventListener('touchend', (e) => {
             const now = Date.now();
@@ -1518,6 +1548,7 @@ function handleMobileFullscreen() {
             lastTouchEnd = now;
         }, { passive: false });
         
+        // Исправляем проблему с прокруткой
         document.addEventListener('touchmove', (e) => {
             if (e.target.closest('#touch-joystick-area') || 
                 e.target.closest('#touch-interact')) {
@@ -1528,6 +1559,7 @@ function handleMobileFullscreen() {
     }
 }
 
+// Вызываем при загрузке
 document.addEventListener('DOMContentLoaded', handleMobileFullscreen);
     
 function setupMobileControls() {
@@ -1539,11 +1571,11 @@ function setupMobileControls() {
     joystickKnob = document.getElementById('joystick-knob');
     const lockHint = document.getElementById('mobile-lock-hint');
     
-    // Скрываем зону поворота
+    // Скрываем зону для поворота (она больше не нужна)
     const lookArea = document.getElementById('touch-look-area');
     if (lookArea) lookArea.style.display = 'none';
     
-    // ДЖОЙСТИК ДВИЖЕНИЯ
+    // === ДЖОЙСТИК ДВИЖЕНИЯ (левая сторона) ===
     joystickArea.addEventListener('touchstart', (e) => {
         e.preventDefault();
         if (!gameActive || isSpectator) return;
@@ -1570,17 +1602,19 @@ function setupMobileControls() {
         moveState.w = false; moveState.s = false; moveState.a = false; moveState.d = false;
     }, { passive: false });
     
-    // СВОБОДНЫЙ ПОВОРОТ КАМЕРЫ (правая половина экрана)
+    // === СВОБОДНЫЙ ПОВОРОТ КАМЕРЫ (правая половина экрана) ===
     let lookTouchId = null;
     let lookStartX = 0, lookStartY = 0;
     
     document.addEventListener('touchstart', (e) => {
         if (!gameActive || isSpectator) return;
         
+        // Ищем касание в правой половине экрана
         for (let i = 0; i < e.changedTouches.length; i++) {
             const touch = e.changedTouches[i];
             const screenMidX = window.innerWidth / 2;
             
+            // Если касание справа и не на джойстике и не на кнопке взаимодействия
             if (touch.clientX > screenMidX && 
                 !touch.target.closest('#touch-joystick-area') &&
                 !touch.target.closest('#touch-interact')) {
@@ -1603,10 +1637,11 @@ function setupMobileControls() {
                 const dx = touch.clientX - lookStartX;
                 const dy = touch.clientY - lookStartY;
                 
-                const sensitivity = 0.005;
+                const sensitivity = 0.005; // Чувствительность поворота
                 yaw -= dx * sensitivity;
                 pitch += dy * sensitivity;
                 
+                // Ограничиваем угол обзора
                 pitch = Math.max(-Math.PI/2 + 0.1, Math.min(Math.PI/2 - 0.1, pitch));
                 camera.rotation.set(pitch, yaw, 0, 'YXZ');
                 
@@ -1627,13 +1662,14 @@ function setupMobileControls() {
         }
     });
     
-    // КНОПКА ВЗАИМОДЕЙСТВИЯ
+    // === КНОПКА ВЗАИМОДЕЙСТВИЯ ===
     touchInteractBtn.addEventListener('touchstart', (e) => {
         e.preventDefault();
         if (!gameActive || isSpectator) return;
         handleInteraction();
     }, { passive: false });
     
+    // Запрос блокировки экрана при старте
     document.addEventListener('touchstart', (e) => {
         if (gameActive && document.pointerLockElement !== document.body && !isSpectator) {
             document.body.requestPointerLock();
@@ -1669,7 +1705,7 @@ function updateJoystick(clientX, clientY) {
 }
 
 // ============================================================
-// 7. ИГРОВАЯ ЛОГИКА
+// 7. ИГРОВАЯ ЛОГИКА (с мультиплеерной синхронизацией)
 // ============================================================
 
 function handleInteraction() {
@@ -1715,6 +1751,7 @@ function handleInteraction() {
                 }
                 playClickSound();
             }
+            // Синхронизируем состояние света с сервером
             if (ws && ws.readyState === WebSocket.OPEN) {
                 ws.send(JSON.stringify({
                     type: 'light_toggle',
@@ -1771,6 +1808,7 @@ function triggerDeath(type) {
     
     playDeathSound();
     
+    // Сообщаем серверу о смерти
     if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: 'player_died' }));
     }
@@ -1803,13 +1841,15 @@ function triggerWin() {
 }
 
 // ============================================================
-// 8. ОБНОВЛЕНИЕ ИГРЫ
+// 8. ОБНОВЛЕНИЕ ИГРЫ (с синхронизацией)
 // ============================================================
 
 function updateHorror(delta) {
     if (!gameActive || isPaused || horrorState.deathPending || isSpectator) return;
     
     const time = gameTimeSeconds;
+    const minutes = Math.floor(time / 60);
+    const seconds = Math.floor(time % 60);
     
     if (time < 90) horrorState.phase = 0;
     else if (time < 180) horrorState.phase = 1;
@@ -1945,6 +1985,8 @@ function updateHorror(delta) {
                 triggerDeath('dark');
                 return;
             }
+            document.getElementById('timer-warning').classList.add('show');
+            document.getElementById('timer-warning').textContent = `⚠️ СВЕТ ВЫКЛЮЧЕН! ${Math.ceil(20 - horrorState.powerOutageTimer)}с`;
         }
     }
     
@@ -1981,19 +2023,23 @@ function triggerPowerOutage() {
 // ============================================================
 
 function updateRemotePlayers(players) {
+    console.log('🔄 Обновление игроков:', players);
+    
     if (!scene) {
-        console.warn('⚠️ Сцена еще не инициализирована для игроков');
+        console.warn('⚠️ Сцена еще не инициализирована');
         return;
     }
     
+    // Удаляем старые модели
     for (const id in playerMeshes) {
         if (!players.find(p => p.id === id)) {
-            scene.remove(playerMeshes[id]);
+            if (scene) scene.remove(playerMeshes[id]);
             delete playerMeshes[id];
         }
     }
     
     for (const player of players) {
+        // Пропускаем себя
         if (player.id === myPlayerId) continue;
         
         if (!playerMeshes[player.id]) {
@@ -2009,7 +2055,7 @@ function updateRemotePlayers(players) {
                 });
             }
             
-            scene.add(model);
+            if (scene) scene.add(model);
             playerMeshes[player.id] = model;
             console.log('✅ Создана модель для:', player.name, player.id);
         }
@@ -2042,12 +2088,6 @@ const gameClock = new THREE.Clock();
 
 function animate() {
     requestAnimationFrame(animate);
-    
-    if (!scene || !camera || !renderer) {
-        console.warn('⏳ Ожидание инициализации сцены...');
-        return;
-    }
-    
     const delta = gameClock.getDelta();
 
     if (gameActive && !isPaused && !isSpectator) {
@@ -2114,6 +2154,7 @@ function animate() {
             }
         }
         
+        // Отправляем позицию на сервер с высокой частотой
         const now = performance.now() / 1000;
         if (ws && ws.readyState === WebSocket.OPEN && now - lastSendTime > SEND_INTERVAL) {
             lastSendTime = now;
@@ -2129,8 +2170,7 @@ function animate() {
         }
     }
 
-    // ВСЕГДА рендерим, если сцена инициализирована
-    if (scene && camera && renderer && sceneInitialized) {
+    if (scene && camera && renderer) {
         renderer.setRenderTarget(renderTarget);
         renderer.render(scene, camera);
         renderer.setRenderTarget(null);
@@ -2279,19 +2319,13 @@ function playVideoScene() {
 // ============================================================
 
 async function startGame() {
-    console.log('🚀 Запуск игры...');
-    
-    if (!sceneInitialized) {
-        console.error('❌ Сцена не инициализирована!');
-        return;
-    }
-    
     initAudio();
+    init3D();
     gameActive = true;
     gameClock.start();
     isSpectator = false;
     
-    // Отправляем позицию сразу
+    // Отправляем свою позицию сразу после старта
     if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({
             type: 'player_update',
@@ -2303,6 +2337,7 @@ async function startGame() {
             rotation: { pitch: 0, yaw: 0 }
         }));
         
+        // Запрашиваем позиции других игроков
         ws.send(JSON.stringify({
             type: 'request_players'
         }));
@@ -2320,7 +2355,6 @@ async function startGame() {
     if (!animationRunning) {
         animationRunning = true;
         animate();
-        console.log('🎬 Анимация запущена');
     }
     
     if (isMobile) {
@@ -2333,8 +2367,6 @@ async function startGame() {
     } else {
         document.body.requestPointerLock();
     }
-    
-    console.log('✅ Игра запущена');
 }
 
 function resetGame() {
@@ -2369,6 +2401,7 @@ function resetGame() {
     document.getElementById('timer-warning').classList.remove('show');
     document.getElementById('breath-indicator').classList.remove('show');
     
+    // Удаляем модели других игроков
     for (const id in playerMeshes) {
         if (scene) scene.remove(playerMeshes[id]);
         delete playerMeshes[id];
@@ -2389,6 +2422,7 @@ function resetGame() {
     updateClockTexture("00:00");
     init3D();
     
+    // Сообщаем серверу о перезапуске
     if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: 'restart_game' }));
     }
@@ -2414,9 +2448,11 @@ document.getElementById('btn-resume').addEventListener('click', () => {
 document.getElementById('btn-restart').addEventListener('click', resetGame);
 document.getElementById('btn-restart-win').addEventListener('click', resetGame);
 
+// Настройка мобильных контролов
 if (isMobile) {
     document.getElementById('mobile-controls').classList.add('active');
     document.getElementById('interaction-hint').style.display = 'none';
+    // Скрываем look-area на мобильных
     const lookArea = document.getElementById('touch-look-area');
     if (lookArea) lookArea.style.display = 'none';
 }
