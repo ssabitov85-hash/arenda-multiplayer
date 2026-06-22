@@ -1212,34 +1212,61 @@ const wardrobeGroup = new THREE.Group();
 wardrobeGroup.position.set(8, 0, -8);
 scene.add(wardrobeGroup);
 
-const wardrobeBody = new THREE.Mesh(new THREE.BoxGeometry(3, 8, 3), woodMat);
-wardrobeBody.position.y = 4;
+// Корпус шкафа (ниже, чтобы был виден)
+const wardrobeBody = new THREE.Mesh(new THREE.BoxGeometry(3, 7, 2.5), woodMat);
+wardrobeBody.position.y = 3.5;
 wardrobeBody.castShadow = true; wardrobeBody.receiveShadow = true;
 wardrobeGroup.add(wardrobeBody);
 
-// Дырки для света
+// Задняя стенка
+const backWall = new THREE.Mesh(new THREE.PlaneGeometry(2.9, 6.9), woodMat);
+backWall.position.set(0, 3.5, -1.24);
+wardrobeGroup.add(backWall);
+
+// Дырки-глазки на дверцах (12 штук: 3 ряда × 4 колонки)
 const holeMat = new THREE.MeshStandardMaterial({ color: 0x000000, roughness: 1 });
 for (let r = 0; r < 3; r++) {
     for (let c = 0; c < 4; c++) {
-        const hole = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 1.6, 8), holeMat);
-        hole.position.set(-0.6 + c * 0.4, 2 + r * 2.5, 1.51);
+        const hole = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.15, 8), holeMat);
+        hole.position.set(-0.5 + c * 0.33, 2 + r * 2, 1.26);
         wardrobeGroup.add(hole);
     }
 }
 
-// Дверцы
-const doorL = new THREE.Mesh(new THREE.BoxGeometry(0.1, 7.5, 1.45), woodMat);
-doorL.position.set(-0.75, 4, 1.5);
+// Левая дверца
+const doorL = new THREE.Mesh(new THREE.BoxGeometry(0.08, 6.8, 1.2), woodMat);
+doorL.position.set(-0.72, 3.5, 1.25);
 doorL.userData = { isDoor: true, side: 'left' };
 wardrobeGroup.add(doorL);
 
-const doorR = new THREE.Mesh(new THREE.BoxGeometry(0.1, 7.5, 1.45), woodMat);
-doorR.position.set(0.75, 4, 1.5);
+// Правая дверца
+const doorR = new THREE.Mesh(new THREE.BoxGeometry(0.08, 6.8, 1.2), woodMat);
+doorR.position.set(0.72, 3.5, 1.25);
 doorR.userData = { isDoor: true, side: 'right' };
 wardrobeGroup.add(doorR);
 
-wardrobeMesh = wardrobeGroup;
-wardrobeMesh.userData = { type: 'wardrobe', doors: [doorL, doorR], doorOpen: false };
+// Ручки
+const handleMat = new THREE.MeshStandardMaterial({ color: 0xcccccc, metalness: 0.8 });
+const handleL = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.3, 8), handleMat);
+handleL.rotation.x = Math.PI/2;
+handleL.position.set(-0.72, 3.5, 1.85);
+wardrobeGroup.add(handleL);
+
+const handleR = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.3, 8), handleMat);
+handleR.rotation.x = Math.PI/2;
+handleR.position.set(0.72, 3.5, 1.85);
+wardrobeGroup.add(handleR);
+
+// Невидимый меш для обнаружения (чуть шире самого шкафа)
+const wardrobeDetector = new THREE.Mesh(
+    new THREE.BoxGeometry(3.2, 7.2, 2.8),
+    new THREE.MeshBasicMaterial({ visible: false })
+);
+wardrobeDetector.position.y = 3.5;
+wardrobeDetector.userData = { type: 'wardrobe', doors: [doorL, doorR], doorOpen: false };
+wardrobeGroup.add(wardrobeDetector);
+
+wardrobeMesh = wardrobeDetector;
 
     // Дверь
     const doorMat = new THREE.MeshStandardMaterial({ color: 0x4a3a2a, roughness: 0.85 });
@@ -1768,43 +1795,56 @@ function handleInteraction() {
     if (photoUI.style.display === 'block') { photoUI.style.display = 'none'; return; }
     if (!gameActive || isPaused || isSpectator) return;
     
-    // Проверяем hoveredObject и его родителя для шкафа
+    // Находим цель с правильным userData
     let target = hoveredObject;
     if (!target) return;
     
-    // Поднимаемся по иерархии для поиска userData
-    let wardrobeParent = target;
-    while (wardrobeParent && wardrobeParent.parent) {
-        if (wardrobeParent.userData && wardrobeParent.userData.type === 'wardrobe') {
-            target = wardrobeParent;
-            break;
-        }
-        wardrobeParent = wardrobeParent.parent;
+    // Поднимаемся по иерархии для поиска userData.type
+    let checkObj = target;
+    while (checkObj && (!checkObj.userData || !checkObj.userData.type)) {
+        checkObj = checkObj.parent;
+    }
+    if (checkObj && checkObj.userData && checkObj.userData.type) {
+        target = checkObj;
+    } else {
+        return;
     }
     
-    if (target.userData && target.userData.type === 'note') {
+    if (target.userData.type === 'note') {
         document.getElementById('photo-ui').style.display = 'block';
-    } else if (target.userData && target.userData.type === 'wardrobe') {
+    } else if (target.userData.type === 'wardrobe') {
         const w = target.userData;
         w.doorOpen = !w.doorOpen;
         w.doors[0].rotation.y = w.doorOpen ? -Math.PI/2 : 0;
         w.doors[1].rotation.y = w.doorOpen ? Math.PI/2 : 0;
+        
         if (w.doorOpen) {
-            camera.position.set(wardrobeMesh.position.x, 2.5, wardrobeMesh.position.z);
-            horrorState.isInCloset = true;
-            showEventText('🚪 Вы в шкафу. Нажмите ещё раз чтобы выйти', 2);
+            showEventText('🚪 Шкаф открыт. Нажмите ЛКМ чтобы зайти внутрь', 2);
         } else {
-            camera.position.set(wardrobeMesh.position.x + 1.5, 5, wardrobeMesh.position.z);
-            horrorState.isInCloset = false;
+            // Если игрок был в шкафу — выталкиваем наружу
+            if (horrorState.isInCloset) {
+                camera.position.set(8, 5, -6.5);
+                horrorState.isInCloset = false;
+            }
+            showEventText('🚪 Шкаф закрыт', 1.5);
         }
-    } else if (target.userData && target.userData.type === 'door') {
+        playClickSound();
+    } else if (target.userData.type === 'wardrobe_enter') {
+        // Зайти в шкаф (только когда дверцы открыты)
+        const w = wardrobeMesh.userData;
+        if (w.doorOpen) {
+            camera.position.set(8, 3.5, -8);
+            horrorState.isInCloset = true;
+            showEventText('🚪 Вы в шкафу. Нажмите на дверцу чтобы выйти', 2);
+        }
+    } else if (target.userData.type === 'door') {
         if (horrorState.phase >= 2) triggerDeath('door');
         else showEventText('🚪 Дверь заперта...', 2);
-    } else if (target.userData && target.userData.type === 'bed') {
+    } else if (target.userData.type === 'bed') {
         camera.position.set(bedMesh.position.x, 0.3, bedMesh.position.z);
         horrorState.isUnderBed = true;
         showEventText('🛏️ Вы под кроватью. Нажмите SPACE (или кнопку) чтобы вылезти', 2);
-    } else if (target.userData && target.userData.type === 'switch') {
+    } else if (target.userData.type === 'switch') {
         if (horrorState.powerOutage) {
             isCeilingLightOn = true;
             horrorState.powerOutage = false;
@@ -2200,25 +2240,24 @@ function animate() {
         const touchInteract = document.getElementById('touch-interact');
         
         // Фильтруем пересечения — ищем объект с валидным userData
+        // Фильтруем пересечения — ищем объект с валидным userData
         let validIntersect = null;
         for (const intersect of intersects) {
             if (intersect.distance < 4.0) {
                 let obj = intersect.object;
-                let foundType = obj.userData && obj.userData.type;
                 
-                // Поднимаемся по иерархии для Group-объектов (шкаф)
-                if (!foundType && obj.parent && obj.parent.userData && obj.parent.userData.type) {
-                    foundType = obj.parent.userData.type;
-                    obj = obj.parent;
-                }
-                // Ещё один уровень вверх (для дверок шкафа)
-                if (!foundType && obj.parent && obj.parent.parent && obj.parent.parent.userData && obj.parent.parent.userData.type) {
-                    foundType = obj.parent.parent.userData.type;
-                    obj = obj.parent.parent;
+                // Поднимаемся по иерархии
+                let checkObj = obj;
+                while (checkObj && (!checkObj.userData || !checkObj.userData.type)) {
+                    checkObj = checkObj.parent;
                 }
                 
-                if (foundType) {
-                    validIntersect = obj;
+                if (checkObj && checkObj.userData && checkObj.userData.type) {
+                    // Если шкаф открыт и смотрим внутрь — предлагаем зайти
+                    if (checkObj.userData.type === 'wardrobe' && checkObj.userData.doorOpen && intersect.distance < 2.5) {
+                        checkObj.userData.type = 'wardrobe_enter';
+                    }
+                    validIntersect = checkObj;
                     break;
                 }
             }
@@ -2229,11 +2268,12 @@ function animate() {
             let text = "";
             if (validIntersect.userData.type === 'note') text = "📄 ЛКМ - Посмотреть фото";
             else if (validIntersect.userData.type === 'wardrobe') {
-                text = "🚪 ЛКМ - Шкаф";
+                text = validIntersect.userData.doorOpen ? "🚪 ЛКМ - Закрыть шкаф" : "🚪 ЛКМ - Открыть шкаф";
                 if (horrorState.phase >= 2) text += " (убежище)";
             }
+            else if (validIntersect.userData.type === 'wardrobe_enter') text = "🚶 ЛКМ - Зайти в шкаф";
             else if (validIntersect.userData.type === 'door') text = "🚪 ЛКМ - Выйти";
-            else if (validIntersect.userData.type === 'bed') text = "🛏️ ЛКМ - Кровать";
+            else if (validIntersect.userData.type === 'bed') text = "🛏️ ЛКМ - Залезть под кровать";
             else if (validIntersect.userData.type === 'switch') {
                 text = horrorState.powerOutage ? "💡 ЛКМ - Включить свет!" : (isCeilingLightOn ? "🔆 ЛКМ - Выключить свет" : "🔅 ЛКМ - Включить свет");
             }
