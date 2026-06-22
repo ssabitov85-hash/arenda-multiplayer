@@ -1472,7 +1472,7 @@ function setupControls() {
             // Выход из-под кровати на SPACE
             if (e.code === 'Space' && horrorState.isUnderBed && gameActive && !isSpectator) {
                 e.preventDefault();
-                camera.position.set(bedMesh.position.x, 5, bedMesh.position.z + 1);
+                camera.position.set(bedMesh.position.x, 5, bedMesh.position.z + 3);
                 horrorState.isUnderBed = false;
                 showEventText('✅ Вы вылезли', 1);
                 return;
@@ -1685,7 +1685,7 @@ function setupMobileControls() {
         e.preventDefault();
         e.stopPropagation();
         if (horrorState.isUnderBed && gameActive && !isSpectator) {
-            camera.position.set(bedMesh.position.x, 5, bedMesh.position.z + 1);
+            camera.position.set(bedMesh.position.x, 5, bedMesh.position.z + 3);
             horrorState.isUnderBed = false;
             crawlBtn.style.display = 'none';
             showEventText('✅ Вы вылезли', 1);
@@ -2181,7 +2181,7 @@ function animate() {
         if (!checkCollision(testZ)) camera.position.z += moveVec.z;
 
         raycaster.setFromCamera(centerVector, camera);
-        const intersects = raycaster.intersectObjects([wardrobeMesh, noteMesh, doorMesh, bedMesh, switchMesh]);
+        const intersects = raycaster.intersectObjects([wardrobeMesh, noteMesh, doorMesh, bedMesh, switchMesh], true);
         
         const hint = document.getElementById('interaction-hint');
         const touchInteract = document.getElementById('touch-interact');
