@@ -402,7 +402,7 @@ canvas { display: block; }
         <div class="status-text" id="lobby-status">Ожидание игроков...</div>
         <div class="lobby-buttons">
     <button class="btn btn-primary" id="btn-start-game" disabled>▶ Начать игру</button>
-    <button class="btn" id="btn-refresh-players">🔄 Обновить список</button>  <!-- НОВАЯ КНОПКА -->
+    <button class="btn" id="btn-refresh-players">🔄 Обновить список</button>
     <button class="btn" id="btn-leave-lobby">✖ Выйти</button>
 </div>
     </div>
@@ -449,16 +449,16 @@ canvas { display: block; }
 // 1. МУЛЬТИПЛЕЕРНАЯ СИСТЕМА (WebSocket)
 // ============================================================
 
-// === ПОДКЛЮЧЕНИЕ К ВАШЕМУ СЕРВЕРУ НА RENDER ===
-// ИСПРАВЛЕНО: используем wss:// и текущий хост
-const WS_URL = `wss://${window.location.hostname}`;
+// === ПОДКЛЮЧЕНИЕ К СЕРВЕРУ ===
+// ИСПРАВЛЕНО: используем правильный протокол и порт
+const WS_URL = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.hostname}`;
 
 // === СОСТОЯНИЕ МУЛЬТИПЛЕЕРА ===
 let ws = null;
 let roomCode = '';
 let isHost = false;
 let myPlayerId = null;
-let otherPlayers = {}; // { id: { position, rotation, alive, name } }
+let otherPlayers = {};
 let playersInRoom = [];
 let gameStarted = false;
 let isSpectator = false;
@@ -505,7 +505,6 @@ function handleWebSocketMessage(event) {
                 isHost = true;
                 showLobbyScreen();
                 updateLobbyUI(data.players);
-                // ВАЖНО: хост тоже должен видеть игроков
                 updateRemotePlayers(data.players);
                 break;
                 
@@ -515,14 +514,12 @@ function handleWebSocketMessage(event) {
                 isHost = false;
                 showLobbyScreen();
                 updateLobbyUI(data.players);
-                // ВАЖНО: подключающийся видит всех
                 updateRemotePlayers(data.players);
                 break;
                 
             case 'player_joined':
                 playersInRoom = data.players;
                 updateLobbyUI(data.players);
-                // ВАЖНО: обновляем модели всех игроков
                 updateRemotePlayers(data.players);
                 break;
                 
@@ -535,9 +532,13 @@ function handleWebSocketMessage(event) {
             case 'game_start':
                 gameStarted = true;
                 document.getElementById('lobby-screen').style.display = 'none';
-                // ВАЖНО: передаем всех игроков в игру
+                playersInRoom = data.players;
                 updateRemotePlayers(data.players);
-                startGame();
+                
+                // Если игра ещё не активна - запускаем без пересоздания сцены
+                if (!gameActive) {
+                    startGameWithoutReinit();
+                }
                 break;
                 
             case 'player_update':
@@ -547,6 +548,7 @@ function handleWebSocketMessage(event) {
             case 'player_died':
                 if (data.playerId === myPlayerId) {
                     isSpectator = true;
+                    gameActive = false;
                     showEventText('💀 Вы погибли! Наблюдайте за игрой.', 3);
                 } else {
                     showEventText(`💀 ${data.playerName || 'Игрок'} погиб!`, 2);
@@ -555,19 +557,36 @@ function handleWebSocketMessage(event) {
                 break;
 
             case 'request_players':
-    // Сервер присылает актуальный список
-    playersInRoom = data.players;
-    updateLobbyUI(data.players);
-    updateRemotePlayers(data.players);
-    showEventText(`👥 В лобби ${data.players.length} игроков`, 1.5);
-    break; 
+                playersInRoom = data.players;
+                updateLobbyUI(data.players);
+                updateRemotePlayers(data.players);
+                showEventText(`👥 В лобби ${data.players.length} игроков`, 1.5);
+                break; 
                 
             case 'game_over':
                 gameStarted = false;
+                gameActive = false;
                 if (data.winner === myPlayerId) {
                     triggerWin();
                 } else {
                     showEventText(`🏆 ${data.winnerName || 'Игрок'} победил!`, 5);
+                }
+                break;
+                
+            case 'light_toggle':
+                isCeilingLightOn = data.isOn;
+                if (isCeilingLightOn) {
+                    ceilingPointLight.intensity = 1.5;
+                    ceilingBulbMat.emissive.setHex(0xffcc88);
+                    if(switchRocker) switchRocker.rotation.x = -0.2;
+                    ambientLight.intensity = 0.4;
+                    mainLight.intensity = 0.4;
+                } else {
+                    ceilingPointLight.intensity = 0;
+                    ceilingBulbMat.emissive.setHex(0x000000);
+                    if(switchRocker) switchRocker.rotation.x = 0.2;
+                    ambientLight.intensity = 0.05;
+                    mainLight.intensity = 0.05;
                 }
                 break;
                 
@@ -590,17 +609,10 @@ function showLobbyScreen() {
 function updateLobbyUI(players) {
     playersInRoom = players || [];
     const count = playersInRoom.length;
-    
-    // Сначала генерируем строку с именами
     const names = playersInRoom.map(p => p.name || 'Игрок').join(', ');
-    
-    // Перезаписываем список игроков, но сохраняем внутри тег с id="player-count"
     document.getElementById('players-list').innerHTML = `Игроки: (${count}) <span id="player-count" style="color: #fff; margin: 0 10px;">${names || '...'}</span>`;
-    
-    // Обновляем код комнаты
     document.getElementById('lobby-code-display').textContent = roomCode;
     
-    // Логика кнопки старта
     const startBtn = document.getElementById('btn-start-game');
     if (isHost && count >= 2) {
         startBtn.disabled = false;
@@ -613,7 +625,7 @@ function updateLobbyUI(players) {
         document.getElementById('lobby-status').textContent = `⏳ Ожидание начала игры... (${count} игроков)`;
     }
 }
-// Кнопка обновления списка игроков
+
 document.getElementById('btn-refresh-players').addEventListener('click', () => {
     if (ws && ws.readyState === WebSocket.OPEN) {
         showEventText('🔄 Обновление списка...', 1);
@@ -684,7 +696,7 @@ document.getElementById('btn-leave-lobby').addEventListener('click', () => {
     if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ 
             type: 'leave_room',
-            roomCode: roomCode // <--- ДОБАВЛЕНО: передаем код комнаты для корректного выхода
+            roomCode: roomCode
         }));
         ws.close();
     }
@@ -700,11 +712,16 @@ document.getElementById('btn-start-game').addEventListener('click', () => {
 });
 
 function getPlayerName() {
-    return localStorage.getItem('playerName') || 'Игрок_' + String(Math.floor(1000 + Math.random() * 9000));
+    let name = localStorage.getItem('playerName');
+    if (!name) {
+        name = 'Игрок_' + String(Math.floor(1000 + Math.random() * 9000));
+        localStorage.setItem('playerName', name);
+    }
+    return name;
 }
 
 // ============================================================
-// 2. ГРАФИКА (Three.js & Постпроцессинг) — БЕЗ ИЗМЕНЕНИЙ
+// 2. ГРАФИКА (Three.js)
 // ============================================================
 
 let scene, camera, renderer;
@@ -758,7 +775,7 @@ let joystickKnob = null;
 let touchInteractBtn = null;
 
 // ============================================================
-// 3. АУДИО (без изменений)
+// 3. АУДИО
 // ============================================================
 
 const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -931,7 +948,7 @@ function playClickSound() {
 }
 
 // ============================================================
-// 4. ГРАФИКА (Three.js) — БЕЗ ИЗМЕНЕНИЙ
+// 4. ГРАФИКА (Three.js)
 // ============================================================
 
 function init3D() {
@@ -1391,7 +1408,6 @@ function createPlayerModel(color = 0x44aaff, name = '') {
         canvas.height = 64;
         const ctx = canvas.getContext('2d');
         ctx.fillStyle = 'rgba(0,0,0,0.5)';
-        // Используем roundRect если доступен
         if (ctx.roundRect) {
             ctx.roundRect(10, 10, 236, 44, 10);
         } else {
@@ -1436,7 +1452,7 @@ function createGhostModel(color = 0x44aaff) {
 }
 
 // ============================================================
-// 6. УПРАВЛЕНИЕ (без изменений)
+// 6. УПРАВЛЕНИЕ
 // ============================================================
 
 function setupControls() {
@@ -1492,10 +1508,8 @@ function setupControls() {
 }
 
 // === МОБИЛЬНЫЙ FULLSCREEN И ОРИЕНТАЦИЯ ===
-// === МОБИЛЬНЫЙ FULLSCREEN И ОРИЕНТАЦИЯ ===
 function handleMobileFullscreen() {
     if (isMobile) {
-        // Устанавливаем правильную высоту для мобильных (исправляет проблему с 100vh)
         function setVH() {
             const vh = window.innerHeight * 0.01;
             document.documentElement.style.setProperty('--vh', `${vh}px`);
@@ -1503,7 +1517,6 @@ function handleMobileFullscreen() {
         setVH();
         window.addEventListener('resize', setVH);
         
-        // Принудительный fullscreen при касании
         document.addEventListener('touchstart', () => {
             if (document.documentElement.requestFullscreen && 
                 !document.fullscreenElement) {
@@ -1511,11 +1524,9 @@ function handleMobileFullscreen() {
             }
         }, { passive: true });
         
-        // Следим за изменением ориентации
         if (window.screen && window.screen.orientation) {
             window.screen.orientation.addEventListener('change', () => {
                 setVH();
-                // Пытаемся войти в fullscreen при повороте
                 if (!document.fullscreenElement && 
                     document.documentElement.requestFullscreen) {
                     document.documentElement.requestFullscreen().catch(() => {});
@@ -1523,10 +1534,8 @@ function handleMobileFullscreen() {
             });
         }
         
-        // Следим за выходом из fullscreen — возвращаем обратно
         document.addEventListener('fullscreenchange', () => {
             if (!document.fullscreenElement && isMobile) {
-                // Пользователь вышел из fullscreen — пробуем вернуть
                 setTimeout(() => {
                     if (!document.fullscreenElement && 
                         document.documentElement.requestFullscreen) {
@@ -1536,12 +1545,10 @@ function handleMobileFullscreen() {
             }
         });
         
-        // Запрещаем масштабирование жестами
         document.addEventListener('gesturestart', (e) => e.preventDefault());
         document.addEventListener('gesturechange', (e) => e.preventDefault());
         document.addEventListener('gestureend', (e) => e.preventDefault());
         
-        // Запрещаем двойной тап для зума
         let lastTouchEnd = 0;
         document.addEventListener('touchend', (e) => {
             const now = Date.now();
@@ -1551,7 +1558,6 @@ function handleMobileFullscreen() {
             lastTouchEnd = now;
         }, { passive: false });
         
-        // Исправляем проблему с прокруткой
         document.addEventListener('touchmove', (e) => {
             if (e.target.closest('#touch-joystick-area') || 
                 e.target.closest('#touch-look-area') ||
@@ -1563,7 +1569,6 @@ function handleMobileFullscreen() {
     }
 }
 
-// Вызываем при загрузке
 document.addEventListener('DOMContentLoaded', handleMobileFullscreen);
     
 function setupMobileControls() {
@@ -1609,7 +1614,6 @@ function setupMobileControls() {
         moveState.w = false; moveState.s = false; moveState.a = false; moveState.d = false;
     }, { passive: false });
     
-    // Для обзора на мобильных
     let touchLookActive = false;
     let touchLookStartX = 0, touchLookStartY = 0;
     
@@ -1674,7 +1678,7 @@ function updateJoystick(clientX, clientY) {
 }
 
 // ============================================================
-// 7. ИГРОВАЯ ЛОГИКА (с мультиплеерной синхронизацией)
+// 7. ИГРОВАЯ ЛОГИКА
 // ============================================================
 
 function handleInteraction() {
@@ -1691,17 +1695,14 @@ function handleInteraction() {
             }
         } else if (hoveredObject.userData.type === 'bed' || hoveredObject.userData.type === 'underBed') {
             showEventText('🛏️ Под кроватью темно...', 2);
-            // Спрятаться под кровать
             if (horrorState.phase >= 1) {
                 showEventText('🛏️ Ты прячешься под кроватью...', 2);
-                // Визуальный эффект - затемнение
                 const flash = document.getElementById('death-flash');
                 flash.style.opacity = '0.3';
                 setTimeout(() => { flash.style.opacity = '0'; }, 1000);
             }
         } else if (hoveredObject.userData.type === 'wardrobe') {
             showEventText('🚪 Шкаф', 1);
-            // Спрятаться в шкафу
             if (horrorState.phase >= 1) {
                 showEventText('🚪 Ты прячешься в шкафу...', 2);
                 const flash = document.getElementById('death-flash');
@@ -1737,7 +1738,6 @@ function handleInteraction() {
                 }
                 playClickSound();
             }
-            // Синхронизируем состояние света с сервером
             if (ws && ws.readyState === WebSocket.OPEN) {
                 ws.send(JSON.stringify({
                     type: 'light_toggle',
@@ -1794,7 +1794,6 @@ function triggerDeath(type) {
     
     playDeathSound();
     
-    // Сообщаем серверу о смерти
     if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: 'player_died' }));
     }
@@ -1827,15 +1826,13 @@ function triggerWin() {
 }
 
 // ============================================================
-// 8. ОБНОВЛЕНИЕ ИГРЫ (с синхронизацией)
+// 8. ОБНОВЛЕНИЕ ИГРЫ
 // ============================================================
 
 function updateHorror(delta) {
     if (!gameActive || isPaused || horrorState.deathPending || isSpectator) return;
     
     const time = gameTimeSeconds;
-    const minutes = Math.floor(time / 60);
-    const seconds = Math.floor(time % 60);
     
     if (time < 90) horrorState.phase = 0;
     else if (time < 180) horrorState.phase = 1;
@@ -1982,7 +1979,6 @@ function updateHorror(delta) {
         warning.textContent = `⚠️ СВЕТ ВЫКЛЮЧЕН! ${Math.ceil(20 - horrorState.powerOutageTimer)}с`;
     }
     
-    // Отправляем позицию на сервер
     if (ws && ws.readyState === WebSocket.OPEN && gameActive && !isSpectator) {
         ws.send(JSON.stringify({
             type: 'player_update',
@@ -2020,7 +2016,6 @@ function triggerPowerOutage() {
 function updateRemotePlayers(players) {
     console.log('🔄 Обновление игроков:', players);
     
-    // Удаляем старые модели
     for (const id in playerMeshes) {
         if (!players.find(p => p.id === id)) {
             if (scene) scene.remove(playerMeshes[id]);
@@ -2029,7 +2024,6 @@ function updateRemotePlayers(players) {
     }
     
     for (const player of players) {
-        // Пропускаем себя
         if (player.id === myPlayerId) continue;
         
         if (!playerMeshes[player.id]) {
@@ -2286,14 +2280,11 @@ function playVideoScene() {
 // 12. ЗАПУСК ИГРЫ
 // ============================================================
 
-async function startGame() {
-    initAudio();
-    init3D();
+function startGameWithoutReinit() {
     gameActive = true;
     clock.start();
     isSpectator = false;
     
-    // ВАЖНО: синхронизируем игроков при старте
     if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({
             type: 'request_players'
@@ -2313,6 +2304,66 @@ async function startGame() {
         animationRunning = true;
         animate();
     }
+    
+    // Отправляем свою позицию сразу после старта
+    setTimeout(() => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({
+                type: 'player_update',
+                position: { x: camera.position.x, y: camera.position.y, z: camera.position.z },
+                rotation: { pitch, yaw }
+            }));
+        }
+    }, 100);
+    
+    if (isMobile) {
+        document.getElementById('mobile-lock-hint').style.display = 'block';
+        setTimeout(() => {
+            if (document.pointerLockElement !== document.body) {
+                document.body.requestPointerLock();
+            }
+        }, 500);
+    } else {
+        document.body.requestPointerLock();
+    }
+}
+
+async function startGame() {
+    initAudio();
+    init3D();
+    gameActive = true;
+    clock.start();
+    isSpectator = false;
+    
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+            type: 'request_players'
+        }));
+    }
+    
+    horrorState = {
+        phase: 0, tvEvent: false, tvEventTimer: 0, tvWatched: false, tvWatchedTime: 0,
+        knockEvent: false, knockTimer: 0, knockActive: false,
+        powerOutage: false, powerOutageTimer: 0, powerOutageCount: 0,
+        isInCloset: false, lastMoveTime: 0, isStandingStill: false, standStillTimer: 0,
+        deathPending: false, deathType: '', eventTextTimeout: null,
+        flickerTimer: 0, flickerActive: false, lightFlickerTimer: 0,
+    };
+    
+    if (!animationRunning) {
+        animationRunning = true;
+        animate();
+    }
+    
+    setTimeout(() => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({
+                type: 'player_update',
+                position: { x: camera.position.x, y: camera.position.y, z: camera.position.z },
+                rotation: { pitch, yaw }
+            }));
+        }
+    }, 100);
     
     if (isMobile) {
         document.getElementById('mobile-lock-hint').style.display = 'block';
@@ -2358,7 +2409,6 @@ function resetGame() {
     document.getElementById('timer-warning').classList.remove('show');
     document.getElementById('breath-indicator').classList.remove('show');
     
-    // Удаляем модели других игроков
     for (const id in playerMeshes) {
         scene.remove(playerMeshes[id]);
         delete playerMeshes[id];
@@ -2379,7 +2429,6 @@ function resetGame() {
     updateClockTexture("00:00");
     init3D();
     
-    // Сообщаем серверу о перезапуске
     if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: 'restart_game' }));
     }
@@ -2405,7 +2454,6 @@ document.getElementById('btn-resume').addEventListener('click', () => {
 document.getElementById('btn-restart').addEventListener('click', resetGame);
 document.getElementById('btn-restart-win').addEventListener('click', resetGame);
 
-// Настройка мобильных контролов
 if (isMobile) {
     document.getElementById('mobile-controls').classList.add('active');
     document.getElementById('interaction-hint').style.display = 'none';
