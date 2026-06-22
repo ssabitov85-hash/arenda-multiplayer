@@ -451,17 +451,19 @@ canvas { display: block; }
 
 // === ПОДКЛЮЧЕНИЕ К ВАШЕМУ СЕРВЕРУ НА RENDER ===
 // ИСПРАВЛЕНО: используем wss:// и текущий хост
-const WS_URL = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.hostname}`;
+const WS_URL = `wss://${window.location.hostname}`;
 
+// === СОСТОЯНИЕ МУЛЬТИПЛЕЕРА ===
 let ws = null;
 let roomCode = '';
 let isHost = false;
 let myPlayerId = null;
-let otherPlayers = {};
+let otherPlayers = {}; // { id: { position, rotation, alive, name } }
 let playersInRoom = [];
 let gameStarted = false;
 let isSpectator = false;
 
+// === СОЗДАНИЕ ЛОББИ ===
 function generateRoomCode() {
     return String(Math.floor(100000 + Math.random() * 900000));
 }
@@ -503,6 +505,7 @@ function handleWebSocketMessage(event) {
                 isHost = true;
                 showLobbyScreen();
                 updateLobbyUI(data.players);
+                // ВАЖНО: хост тоже должен видеть игроков
                 updateRemotePlayers(data.players);
                 break;
                 
@@ -512,12 +515,14 @@ function handleWebSocketMessage(event) {
                 isHost = false;
                 showLobbyScreen();
                 updateLobbyUI(data.players);
+                // ВАЖНО: подключающийся видит всех
                 updateRemotePlayers(data.players);
                 break;
                 
             case 'player_joined':
                 playersInRoom = data.players;
                 updateLobbyUI(data.players);
+                // ВАЖНО: обновляем модели всех игроков
                 updateRemotePlayers(data.players);
                 break;
                 
@@ -530,17 +535,9 @@ function handleWebSocketMessage(event) {
             case 'game_start':
                 gameStarted = true;
                 document.getElementById('lobby-screen').style.display = 'none';
-                playersInRoom = data.players;
+                // ВАЖНО: передаем всех игроков в игру
                 updateRemotePlayers(data.players);
-                
-                // ИСПРАВЛЕНИЕ: Проверяем, инициализирована ли сцена, если нет - запускаем полную инициализацию
-                if (!scene) {
-                    // Если сцена не создана, запускаем полную инициализацию
-                    startGameFull();
-                } else if (!gameActive) {
-                    // Если сцена есть, но игра не активна - просто активируем
-                    startGameWithoutReinit();
-                }
+                startGame();
                 break;
                 
             case 'player_update':
@@ -550,7 +547,6 @@ function handleWebSocketMessage(event) {
             case 'player_died':
                 if (data.playerId === myPlayerId) {
                     isSpectator = true;
-                    gameActive = false;
                     showEventText('💀 Вы погибли! Наблюдайте за игрой.', 3);
                 } else {
                     showEventText(`💀 ${data.playerName || 'Игрок'} погиб!`, 2);
@@ -559,38 +555,19 @@ function handleWebSocketMessage(event) {
                 break;
 
             case 'request_players':
-                playersInRoom = data.players;
-                updateLobbyUI(data.players);
-                updateRemotePlayers(data.players);
-                showEventText(`👥 В лобби ${data.players.length} игроков`, 1.5);
-                break; 
+    // Сервер присылает актуальный список
+    playersInRoom = data.players;
+    updateLobbyUI(data.players);
+    updateRemotePlayers(data.players);
+    showEventText(`👥 В лобби ${data.players.length} игроков`, 1.5);
+    break; 
                 
             case 'game_over':
                 gameStarted = false;
-                gameActive = false;
                 if (data.winner === myPlayerId) {
                     triggerWin();
                 } else {
                     showEventText(`🏆 ${data.winnerName || 'Игрок'} победил!`, 5);
-                }
-                break;
-                
-            case 'light_toggle':
-                if (data.isOn !== undefined) {
-                    isCeilingLightOn = data.isOn;
-                    if (isCeilingLightOn) {
-                        if (ceilingPointLight) ceilingPointLight.intensity = 1.5;
-                        if (ceilingBulbMat) ceilingBulbMat.emissive.setHex(0xffcc88);
-                        if (switchRocker) switchRocker.rotation.x = -0.2;
-                        if (ambientLight) ambientLight.intensity = 0.4;
-                        if (mainLight) mainLight.intensity = 0.4;
-                    } else {
-                        if (ceilingPointLight) ceilingPointLight.intensity = 0;
-                        if (ceilingBulbMat) ceilingBulbMat.emissive.setHex(0x000000);
-                        if (switchRocker) switchRocker.rotation.x = 0.2;
-                        if (ambientLight) ambientLight.intensity = 0.05;
-                        if (mainLight) mainLight.intensity = 0.05;
-                    }
                 }
                 break;
                 
@@ -603,6 +580,7 @@ function handleWebSocketMessage(event) {
     }
 }
 
+// === UI ЛОББИ ===
 function showLobbyScreen() {
     document.getElementById('start-screen').style.display = 'none';
     document.getElementById('join-screen').style.display = 'none';
@@ -612,10 +590,17 @@ function showLobbyScreen() {
 function updateLobbyUI(players) {
     playersInRoom = players || [];
     const count = playersInRoom.length;
+    
+    // Сначала генерируем строку с именами
     const names = playersInRoom.map(p => p.name || 'Игрок').join(', ');
+    
+    // Перезаписываем список игроков, но сохраняем внутри тег с id="player-count"
     document.getElementById('players-list').innerHTML = `Игроки: (${count}) <span id="player-count" style="color: #fff; margin: 0 10px;">${names || '...'}</span>`;
+    
+    // Обновляем код комнаты
     document.getElementById('lobby-code-display').textContent = roomCode;
     
+    // Логика кнопки старта
     const startBtn = document.getElementById('btn-start-game');
     if (isHost && count >= 2) {
         startBtn.disabled = false;
@@ -628,7 +613,7 @@ function updateLobbyUI(players) {
         document.getElementById('lobby-status').textContent = `⏳ Ожидание начала игры... (${count} игроков)`;
     }
 }
-
+// Кнопка обновления списка игроков
 document.getElementById('btn-refresh-players').addEventListener('click', () => {
     if (ws && ws.readyState === WebSocket.OPEN) {
         showEventText('🔄 Обновление списка...', 1);
@@ -640,7 +625,8 @@ document.getElementById('btn-refresh-players').addEventListener('click', () => {
         showEventText('❌ Нет соединения с сервером', 2);
     }
 });    
-
+    
+// === СОЗДАНИЕ/ПОДКЛЮЧЕНИЕ ===
 document.getElementById('btn-host').addEventListener('click', async () => {
     try {
         await connectToServer();
@@ -698,7 +684,7 @@ document.getElementById('btn-leave-lobby').addEventListener('click', () => {
     if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ 
             type: 'leave_room',
-            roomCode: roomCode
+            roomCode: roomCode // <--- ДОБАВЛЕНО: передаем код комнаты для корректного выхода
         }));
         ws.close();
     }
@@ -714,16 +700,11 @@ document.getElementById('btn-start-game').addEventListener('click', () => {
 });
 
 function getPlayerName() {
-    let name = localStorage.getItem('playerName');
-    if (!name) {
-        name = 'Игрок_' + String(Math.floor(1000 + Math.random() * 9000));
-        localStorage.setItem('playerName', name);
-    }
-    return name;
+    return localStorage.getItem('playerName') || 'Игрок_' + String(Math.floor(1000 + Math.random() * 9000));
 }
 
 // ============================================================
-// 2. ГРАФИКА (Three.js)
+// 2. ГРАФИКА (Three.js & Постпроцессинг) — БЕЗ ИЗМЕНЕНИЙ
 // ============================================================
 
 let scene, camera, renderer;
@@ -751,6 +732,7 @@ const centerVector = new THREE.Vector2(0, 0);
 let hoveredObject = null;
 let animationRunning = false;
 
+// 3D модели игроков
 let playerMeshes = {};
 
 let horrorState = {
@@ -762,6 +744,7 @@ let horrorState = {
     flickerTimer: 0, flickerActive: false, lightFlickerTimer: 0,
 };
 
+// Мобильные переменные
 const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || 
                 (window.innerWidth < 768 && window.innerHeight < 1024) ||
                 ('ontouchstart' in window) ||
@@ -775,7 +758,7 @@ let joystickKnob = null;
 let touchInteractBtn = null;
 
 // ============================================================
-// 3. АУДИО
+// 3. АУДИО (без изменений)
 // ============================================================
 
 const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -948,7 +931,7 @@ function playClickSound() {
 }
 
 // ============================================================
-// 4. ГРАФИКА (Three.js) - СОКРАЩЕННО для читаемости
+// 4. ГРАФИКА (Three.js) — БЕЗ ИЗМЕНЕНИЙ
 // ============================================================
 
 function init3D() {
@@ -1008,18 +991,33 @@ function init3D() {
 }
 
 function buildRoom() {
-    // Упрощенная комната - основные объекты
     const wallMat = new THREE.MeshStandardMaterial({ color: 0x4a3f32, roughness: 0.9, side: THREE.BackSide });
+    const wallFrontMat = new THREE.MeshStandardMaterial({ color: 0x4a3f32, roughness: 0.9 });
     const invMat = new THREE.MeshBasicMaterial({ visible: false });
     const floorMat = new THREE.MeshStandardMaterial({ color: 0x2a221a, roughness: 1.0, side: THREE.BackSide });
     const woodMat = new THREE.MeshStandardMaterial({ color: 0x2a1a10, roughness: 0.8 });
     const metalMat = new THREE.MeshStandardMaterial({ color: 0x444444, metalness: 0.8, roughness: 0.4 });
+    const bedFrameMat = new THREE.MeshStandardMaterial({ color: 0x5a4a3a, roughness: 0.7 });
+    const mattressMat = new THREE.MeshStandardMaterial({ color: 0x3a3a4a, roughness: 0.9 });
+    const pillowMat = new THREE.MeshStandardMaterial({ color: 0x8a8a8a, roughness: 0.8 });
+    const blanketMat = new THREE.MeshStandardMaterial({ color: 0x4a4a4a, roughness: 0.85 });
 
+    // Комната
     const roomGeo = new THREE.BoxGeometry(20, 10, 20);
     const roomMesh = new THREE.Mesh(roomGeo, [wallMat, invMat, wallMat, floorMat, wallMat, wallMat]);
     roomMesh.position.y = 5;
     roomMesh.receiveShadow = true;
     scene.add(roomMesh);
+
+    // Стены
+    const wallTop = new THREE.Mesh(new THREE.PlaneGeometry(20, 3), wallFrontMat);
+    wallTop.position.set(-10, 8.5, 0); wallTop.rotation.y = Math.PI / 2; wallTop.receiveShadow = true; scene.add(wallTop);
+    const wallBot = new THREE.Mesh(new THREE.PlaneGeometry(20, 3), wallFrontMat);
+    wallBot.position.set(-10, 1.5, 0); wallBot.rotation.y = Math.PI / 2; wallBot.receiveShadow = true; scene.add(wallBot);
+    const wallLeft = new THREE.Mesh(new THREE.PlaneGeometry(7, 4), wallFrontMat);
+    wallLeft.position.set(-10, 5, -6.5); wallLeft.rotation.y = Math.PI / 2; wallLeft.receiveShadow = true; scene.add(wallLeft);
+    const wallRight = new THREE.Mesh(new THREE.PlaneGeometry(7, 4), wallFrontMat);
+    wallRight.position.set(-10, 5, 6.5); wallRight.rotation.y = Math.PI / 2; wallRight.receiveShadow = true; scene.add(wallRight);
 
     ambientLight = new THREE.AmbientLight(0x1a2536, 0.4);
     scene.add(ambientLight);
@@ -1027,6 +1025,178 @@ function buildRoom() {
     mainLight.position.set(0, 9, 0);
     mainLight.castShadow = true;
     scene.add(mainLight);
+
+    // Окно
+    const glassMat = new THREE.MeshBasicMaterial({ color: 0x0a0d12, transparent: true, opacity: 0.15, side: THREE.DoubleSide });
+    const glassMesh = new THREE.Mesh(new THREE.PlaneGeometry(6, 4), glassMat);
+    glassMesh.position.set(-10, 5, 0); glassMesh.rotation.y = Math.PI / 2; scene.add(glassMesh);
+
+    const frameTop = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.2, 6.4), woodMat);
+    frameTop.position.set(-9.9, 7.1, 0); scene.add(frameTop);
+    const frameBot = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.2, 6.4), woodMat);
+    frameBot.position.set(-9.9, 2.9, 0); scene.add(frameBot);
+    const frameSide1 = new THREE.Mesh(new THREE.BoxGeometry(0.2, 4.0, 0.2), woodMat);
+    frameSide1.position.set(-9.9, 5, -3.1); scene.add(frameSide1);
+    const frameSide2 = new THREE.Mesh(new THREE.BoxGeometry(0.2, 4.0, 0.2), woodMat);
+    frameSide2.position.set(-9.9, 5, 3.1); scene.add(frameSide2);
+    const barMesh1 = new THREE.Mesh(new THREE.BoxGeometry(0.1, 4.0, 0.1), woodMat);
+    barMesh1.position.set(-9.95, 5, 0); scene.add(barMesh1);
+    const barMesh2 = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 6.0), woodMat);
+    barMesh2.position.set(-9.95, 5, 0); scene.add(barMesh2);
+
+    // Вид из окна
+    const courtyard = new THREE.Group();
+    courtyard.position.set(-10, 0, 0);
+    scene.add(courtyard);
+    scene.fog = new THREE.FogExp2(0x030508, 0.008);
+
+    function createPanelTexture(hasGlowingWindows, isOppositeHouse) {
+        const canvas = document.createElement('canvas');
+        canvas.width = 512; canvas.height = 1024;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#16191e'; ctx.fillRect(0, 0, 512, 1024);
+        ctx.strokeStyle = '#0d0f12'; ctx.lineWidth = 4;
+        for (let y = 0; y < 1024; y += 64) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(512, y); ctx.stroke(); }
+        for (let x = 0; x < 512; x += 128) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, 1024); ctx.stroke(); }
+        const rows = 12, cols = 4;
+        for (let r = 0; r < rows; r++) {
+            for (let c = 0; c < cols; c++) {
+                const ox = c * 128 + 34, oy = r * 80 + 30, ow = 60, oh = 45;
+                ctx.fillStyle = '#090b0e'; ctx.fillRect(ox - 3, oy - 3, ow + 6, oh + 6);
+                ctx.fillStyle = '#0f131a'; ctx.fillRect(ox, oy, ow, oh);
+                if (hasGlowingWindows && Math.random() < 0.15) {
+                    const randType = Math.random();
+                    ctx.fillStyle = randType < 0.4 ? '#ffe8ad' : randType < 0.8 ? '#fce4a6' : '#527da6';
+                    ctx.fillRect(ox, oy, ow, oh);
+                    ctx.strokeStyle = 'rgba(0,0,0,0.5)'; ctx.lineWidth = 2;
+                    ctx.beginPath(); ctx.moveTo(ox + ow/2, oy); ctx.lineTo(ox + ow/2, oy + oh); ctx.stroke();
+                }
+            }
+        }
+        return new THREE.CanvasTexture(canvas);
+    }
+
+    const houseTexLit = createPanelTexture(true, false);
+    const houseTexOpposite = createPanelTexture(true, true);
+    const houseTexDark = createPanelTexture(false, false);
+    const houseMatLit = new THREE.MeshStandardMaterial({ map: houseTexLit, roughness: 0.8 });
+    const houseMatOpposite = new THREE.MeshStandardMaterial({ map: houseTexOpposite, roughness: 0.8 });
+    const houseMatDark = new THREE.MeshStandardMaterial({ map: houseTexDark, roughness: 0.8 });
+
+    const leftHouse = new THREE.Mesh(new THREE.BoxGeometry(15, 50, 40), [houseMatLit, houseMatLit, houseMatDark, houseMatDark, houseMatDark, houseMatDark]);
+    leftHouse.position.set(-25, 12, 28); leftHouse.rotation.y = 0.05; courtyard.add(leftHouse);
+    const rightHouse = new THREE.Mesh(new THREE.BoxGeometry(15, 50, 40), [houseMatLit, houseMatLit, houseMatDark, houseMatDark, houseMatDark, houseMatDark]);
+    rightHouse.position.set(-25, 12, -28); rightHouse.rotation.y = -0.05; courtyard.add(rightHouse);
+    const centerHouse = new THREE.Mesh(new THREE.BoxGeometry(50, 60, 15), [houseMatDark, houseMatDark, houseMatDark, houseMatDark, houseMatOpposite, houseMatDark]);
+    centerHouse.position.set(-75, 15, 2); courtyard.add(centerHouse);
+
+    // Двор
+    const groundCanvas = document.createElement('canvas');
+    groundCanvas.width = 512; groundCanvas.height = 512;
+    const gCtx = groundCanvas.getContext('2d');
+    gCtx.fillStyle = '#080a0d'; gCtx.fillRect(0,0,512,512);
+    gCtx.fillStyle = '#050709'; gCtx.beginPath(); gCtx.arc(256, 256, 120, 0, Math.PI*2); gCtx.fill();
+    const groundTex = new THREE.CanvasTexture(groundCanvas);
+    const groundMat = new THREE.MeshStandardMaterial({ map: groundTex, roughness: 0.9 });
+    const yardGround = new THREE.Mesh(new THREE.PlaneGeometry(150, 150), groundMat);
+    yardGround.rotation.x = -Math.PI/2; yardGround.position.set(-50, -3, 0); courtyard.add(yardGround);
+
+    // Луна
+    const moonGeo = new THREE.CircleGeometry(4, 32);
+    const moonCanvas = document.createElement('canvas');
+    moonCanvas.width = 128; moonCanvas.height = 128;
+    const mCtx = moonCanvas.getContext('2d');
+    let grad = mCtx.createRadialGradient(64,64,5, 64,64,60);
+    grad.addColorStop(0, '#fffae8'); grad.addColorStop(0.2, '#fcefa7'); grad.addColorStop(1, 'rgba(0,0,0,0)');
+    mCtx.fillStyle = grad; mCtx.fillRect(0,0,128,128);
+    const moonTex = new THREE.CanvasTexture(moonCanvas);
+    const moonMesh = new THREE.Mesh(moonGeo, new THREE.MeshBasicMaterial({ map: moonTex, transparent: true }));
+    moonMesh.position.set(-70, 32, -18); moonMesh.rotation.y = Math.PI/2; courtyard.add(moonMesh);
+
+    const moonLight = new THREE.DirectionalLight(0x768fa3, 0.4);
+    moonLight.position.set(-60, 40, -20); courtyard.add(moonLight);
+
+    // Фонарь
+    const lampGroup = new THREE.Group();
+    lampGroup.position.set(-42, -3, -2);
+    const poleGeo = new THREE.CylinderGeometry(0.1, 0.15, 16);
+    const poleMat = new THREE.MeshStandardMaterial({ color: 0x11141a });
+    const pole = new THREE.Mesh(poleGeo, poleMat); pole.position.y = 8; lampGroup.add(pole);
+    const lampTopGeo = new THREE.BoxGeometry(1, 0.3, 0.5);
+    const lampTop = new THREE.Mesh(lampTopGeo, poleMat); lampTop.position.set(-0.4, 16, 0); lampGroup.add(lampTop);
+    const streetLight = new THREE.PointLight(0xffe5b4, 2.2, 35);
+    streetLight.position.set(-0.8, 15.5, 0); streetLight.castShadow = true; lampGroup.add(streetLight);
+    const lightFloorGeo = new THREE.PlaneGeometry(16, 16);
+    const lightFloorCanvas = document.createElement('canvas');
+    lightFloorCanvas.width = 64; lightFloorCanvas.height = 64;
+    const lfCtx = lightFloorCanvas.getContext('2d');
+    let lfGrad = lfCtx.createRadialGradient(32,32,0, 32,32,32);
+    lfGrad.addColorStop(0, 'rgba(255,230,180,0.35)'); lfGrad.addColorStop(1, 'rgba(0,0,0,0)');
+    lfCtx.fillStyle = lfGrad; lfCtx.fillRect(0,0,64,64);
+    const lightFloorMat = new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(lightFloorCanvas), transparent: true, blending: THREE.AdditiveBlending });
+    const lightFloor = new THREE.Mesh(lightFloorGeo, lightFloorMat);
+    lightFloor.rotation.x = -Math.PI/2; lightFloor.position.set(-0.8, 0.05, 0); lampGroup.add(lightFloor);
+    courtyard.add(lampGroup);
+
+    // Детская площадка
+    const playground = new THREE.Group();
+    playground.position.set(-42, -3, 3); courtyard.add(playground);
+    const frameMetalMat = new THREE.MeshStandardMaterial({ color: 0x222933, roughness: 0.6 });
+    const swingGroup = new THREE.Group();
+    swingGroup.position.set(0, 0, 0);
+    const barV1 = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 5), frameMetalMat);
+    barV1.position.set(0, 2.5, -2); barV1.rotation.z = 0.2; swingGroup.add(barV1);
+    const barV2 = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 5), frameMetalMat);
+    barV2.position.set(0, 2.5, 2); barV2.rotation.z = 0.2; swingGroup.add(barV2);
+    const barH = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 4), frameMetalMat);
+    barH.position.set(0, 4.9, 0); barH.rotation.x = Math.PI/2; swingGroup.add(barH);
+    const seat = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.05, 0.8), frameMetalMat);
+    seat.position.set(0, 1.2, 0); swingGroup.add(seat);
+    playground.add(swingGroup);
+
+    const slideGroup = new THREE.Group();
+    slideGroup.position.set(-4, 0, -6); slideGroup.rotation.y = 0.4;
+    const ladder = new THREE.Mesh(new THREE.BoxGeometry(0.1, 4, 1), frameMetalMat);
+    ladder.position.set(0, 2, 0); slideGroup.add(ladder);
+    const ramp = new THREE.Mesh(new THREE.BoxGeometry(5, 0.1, 1.1), new THREE.MeshStandardMaterial({ color: 0x334257 }));
+    ramp.position.set(2.2, 1.8, 0); ramp.rotation.z = -0.6; slideGroup.add(ramp);
+    playground.add(slideGroup);
+
+    // Машины
+    function createCar(cx, cz, crot) {
+        const carGroup = new THREE.Group();
+        carGroup.position.set(cx, -2.6, cz); carGroup.rotation.y = crot;
+        const carMat = new THREE.MeshStandardMaterial({ color: 0x090b0f, roughness: 0.9 });
+        const body = new THREE.Mesh(new THREE.BoxGeometry(4.2, 1.1, 1.8), carMat);
+        body.position.y = 0.55; carGroup.add(body);
+        const cabin = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.7, 1.5), carMat);
+        cabin.position.set(-0.2, 1.25, 0); carGroup.add(cabin);
+        courtyard.add(carGroup);
+        return carGroup;
+    }
+    createCar(-26, 4, Math.PI / 2 + 0.1);
+    createCar(-28, -2, Math.PI / 2 - 0.05);
+    createCar(-55, -12, 0.2);
+    const lightCar = createCar(-58, 14, -0.6);
+    const headlightL = new THREE.SpotLight(0xfffcd1, 4, 30, Math.PI/8, 0.5, 1);
+    headlightL.position.set(2.1, 0.6, -0.6); headlightL.target.position.set(15, 0.3, 2); lightCar.add(headlightL); lightCar.add(headlightL.target);
+    const headlightR = headlightL.clone(); headlightR.position.z = 0.6; lightCar.add(headlightR);
+    const headlightGlowGeo = new THREE.PlaneGeometry(15, 8);
+    const hfMat = new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(lightFloorCanvas), transparent: true, blending: THREE.AdditiveBlending });
+    const hfMesh = new THREE.Mesh(headlightGlowGeo, hfMat);
+    hfMesh.position.set(8, -0.5, 0); hfMesh.rotation.x = -Math.PI/2; lightCar.add(hfMesh);
+
+    // Телевизор
+    const tvBase = new THREE.Mesh(new THREE.BoxGeometry(4, 2, 2), woodMat);
+    tvBase.position.set(0, 1, -9); tvBase.castShadow = true; scene.add(tvBase);
+    const tvBodyGeo = new THREE.BoxGeometry(3, 2.5, 1.5);
+    tvMesh = new THREE.Mesh(tvBodyGeo, metalMat);
+    tvMesh.position.set(0, 3.25, -9); tvMesh.castShadow = true; scene.add(tvMesh);
+    tvScreenMat = new THREE.MeshBasicMaterial({ color: 0x000000 });
+    const tvScreen = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 2.0), tvScreenMat);
+    tvScreen.position.set(0, 3.25, -8.24); scene.add(tvScreen);
+    tvLight = new THREE.PointLight(0xffffff, 0, 15);
+    tvLight.position.set(0, 3.5, -7); scene.add(tvLight);
 
     // Шкаф
     wardrobeMesh = new THREE.Mesh(new THREE.BoxGeometry(3, 8, 3), woodMat);
@@ -1037,58 +1207,56 @@ function buildRoom() {
 
     // Дверь
     const doorMat = new THREE.MeshStandardMaterial({ color: 0x4a3a2a, roughness: 0.85 });
-    doorMesh = new THREE.Mesh(new THREE.BoxGeometry(0.3, 7.0, 3.0), doorMat);
-    doorMesh.position.set(9.85, 3.5, 0);
+    const doorFrameMat = new THREE.MeshStandardMaterial({ color: 0x3a2a1a, roughness: 0.9 });
+    const doorWidth = 3.0, doorHeight = 7.0, doorDepth = 0.3;
+    const frame = new THREE.Mesh(new THREE.BoxGeometry(0.25, doorHeight + 0.2, doorWidth + 0.2), doorFrameMat);
+    frame.position.set(9.9, doorHeight/2, 0); scene.add(frame);
+    doorMesh = new THREE.Mesh(new THREE.BoxGeometry(doorDepth, doorHeight, doorWidth), doorMat);
+    doorMesh.position.set(9.85, doorHeight/2, 0);
     doorMesh.userData = { type: 'door' };
     scene.add(doorMesh);
+    const doorHandleGroup = new THREE.Group();
+    doorHandleGroup.position.set(9.68, doorHeight / 2, 0.8); scene.add(doorHandleGroup);
+    const realHandleMetalMat = new THREE.MeshStandardMaterial({ color: 0xaaaaaa, metalness: 0.85, roughness: 0.25 });
+    const rosette = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.02, 32), realHandleMetalMat);
+    rosette.rotation.z = Math.PI / 2; doorHandleGroup.add(rosette);
+    const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.12, 16), realHandleMetalMat);
+    stem.rotation.z = Math.PI / 2; stem.position.x = -0.05; doorHandleGroup.add(stem);
+    const lever = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.03, 0.45, 16), realHandleMetalMat);
+    lever.rotation.x = Math.PI / 2; lever.position.set(-0.1, 0, 0.2); doorHandleGroup.add(lever);
+    const tip = new THREE.Mesh(new THREE.SphereGeometry(0.033, 16, 16), realHandleMetalMat);
+    tip.position.set(-0.1, 0, 0.425); doorHandleGroup.add(tip);
 
     // Кровать
     const bedX = -6.0, bedZ = 5.5;
-    bedMesh = new THREE.Mesh(new THREE.BoxGeometry(8, 2.4, 6.5), new THREE.MeshBasicMaterial({ visible: false }));
+    const bedGroup = new THREE.Group();
+    bedGroup.position.set(bedX, 0, bedZ); bedGroup.rotation.y = Math.PI / 2; scene.add(bedGroup);
+    const bWidth = 6.5, bLength = 8.0, bHeight = 0.6;
+    const bedFrame = new THREE.Mesh(new THREE.BoxGeometry(bWidth, bHeight, bLength), bedFrameMat);
+    bedFrame.position.set(0, bHeight / 2, 0); bedFrame.castShadow = true; bedFrame.receiveShadow = true; bedGroup.add(bedFrame);
+    const headboard = new THREE.Mesh(new THREE.BoxGeometry(bWidth, 2.4, 0.2), bedFrameMat);
+    headboard.position.set(0, 1.2, -bLength / 2 + 0.1); headboard.castShadow = true; headboard.receiveShadow = true; bedGroup.add(headboard);
+    const mattress = new THREE.Mesh(new THREE.BoxGeometry(bWidth - 0.2, 0.6, bLength - 0.2), mattressMat);
+    mattress.position.set(0, bHeight + 0.3, 0); mattress.receiveShadow = true; bedGroup.add(mattress);
+    const pillow1 = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.25, 1.0), pillowMat);
+    pillow1.position.set(-0.9, bHeight + 0.625, -bLength/2 + 0.7); pillow1.rotation.x = 0.15; bedGroup.add(pillow1);
+    const pillow2 = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.25, 1.0), pillowMat);
+    pillow2.position.set(0.9, bHeight + 0.625, -bLength/2 + 0.7); pillow2.rotation.x = 0.15; bedGroup.add(pillow2);
+    const blanket = new THREE.Mesh(new THREE.BoxGeometry(bWidth - 0.1, 0.12, bLength - 1.4), blanketMat);
+    blanket.position.set(0, bHeight + 0.61, 0.6); blanket.receiveShadow = true; bedGroup.add(blanket);
+    bedMesh = new THREE.Mesh(new THREE.BoxGeometry(bLength, 2.4, bWidth), new THREE.MeshBasicMaterial({ visible: false }));
     bedMesh.position.set(bedX, 1.2, bedZ);
     bedMesh.userData = { type: 'bed' };
     scene.add(bedMesh);
 
-    // Записка
+    // Стол
+    const table = new THREE.Mesh(new THREE.BoxGeometry(2, 2.5, 2), woodMat);
+    table.position.set(-8, 1.25, -8); table.castShadow = true; scene.add(table);
     noteMesh = new THREE.Mesh(new THREE.PlaneGeometry(0.8, 1.1), new THREE.MeshStandardMaterial({ color: 0xfffdd0 }));
-    noteMesh.position.set(-8, 2.51, -8);
-    noteMesh.rotation.x = -Math.PI / 2;
+    noteMesh.position.set(-8, 2.51, -8); noteMesh.rotation.x = -Math.PI / 2; noteMesh.rotation.z = Math.random();
     noteMesh.userData = { type: 'note' };
     scene.add(noteMesh);
 
-    // Телевизор
-    tvMesh = new THREE.Mesh(new THREE.BoxGeometry(3, 2.5, 1.5), metalMat);
-    tvMesh.position.set(0, 3.25, -9);
-    tvMesh.castShadow = true;
-    scene.add(tvMesh);
-    tvScreenMat = new THREE.MeshBasicMaterial({ color: 0x000000 });
-    const tvScreen = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 2.0), tvScreenMat);
-    tvScreen.position.set(0, 3.25, -8.24);
-    scene.add(tvScreen);
-    tvLight = new THREE.PointLight(0xffffff, 0, 15);
-    tvLight.position.set(0, 3.5, -7);
-    scene.add(tvLight);
-
-    // Выключатель
-    switchMesh = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.8, 0.15), new THREE.MeshBasicMaterial({ visible: false }));
-    switchMesh.position.set(9.85, 3.5, 2.2);
-    switchMesh.userData = { type: 'switch' };
-    scene.add(switchMesh);
-
-    // Люстра
-    ceilingLightMesh = new THREE.Group();
-    ceilingLightMesh.position.set(0, 9.8, 0);
-    ceilingBulbMat = new THREE.MeshStandardMaterial({ color: 0xfff5e6, roughness: 0.3, emissive: new THREE.Color(0x000000) });
-    const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.3, 16, 16), ceilingBulbMat);
-    bulb.position.y = -0.8;
-    ceilingLightMesh.add(bulb);
-    scene.add(ceilingLightMesh);
-    ceilingPointLight = new THREE.PointLight(0xffeebb, 0, 15);
-    ceilingPointLight.position.set(0, 9.0, 0);
-    scene.add(ceilingPointLight);
-
-    switchRocker = { rotation: { x: 0.2 } };
-    
     // Часы
     const clockCanvas = document.createElement('canvas');
     clockCanvas.width = 256; clockCanvas.height = 128;
@@ -1096,9 +1264,39 @@ function buildRoom() {
     clockTex = new THREE.CanvasTexture(clockCanvas);
     clockMat = new THREE.MeshBasicMaterial({ map: clockTex });
     const clockMesh = new THREE.Mesh(new THREE.BoxGeometry(2, 1, 0.1), clockMat);
-    clockMesh.position.set(-5, 7, -9.9);
-    scene.add(clockMesh);
+    clockMesh.position.set(-5, 7, -9.9); scene.add(clockMesh);
     updateClockTexture("00:00");
+
+    // Люстра
+    ceilingLightMesh = new THREE.Group();
+    ceilingLightMesh.position.set(0, 9.8, 0);
+    const base = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.4, 0.2, 16), new THREE.MeshStandardMaterial({ color: 0xdddddd, metalness: 0.6, roughness: 0.4 }));
+    ceilingLightMesh.add(base);
+    const rod = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.5, 8), new THREE.MeshStandardMaterial({ color: 0xcccccc, metalness: 0.7 }));
+    rod.position.y = -0.35; ceilingLightMesh.add(rod);
+    ceilingBulbMat = new THREE.MeshStandardMaterial({ color: 0xfff5e6, roughness: 0.3, emissive: new THREE.Color(0x000000) });
+    const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.3, 16, 16), ceilingBulbMat);
+    bulb.position.y = -0.8; ceilingLightMesh.add(bulb);
+    scene.add(ceilingLightMesh);
+    ceilingPointLight = new THREE.PointLight(0xffeebb, 0, 15);
+    ceilingPointLight.position.set(0, 9.0, 0);
+    scene.add(ceilingPointLight);
+
+    // Выключатель
+    const switchGroup = new THREE.Group();
+    switchGroup.position.set(9.85, 3.5, 2.2); switchGroup.rotation.y = -Math.PI / 2; scene.add(switchGroup);
+    const plastikMat = new THREE.MeshStandardMaterial({ color: 0xf0f0e0, roughness: 0.5 });
+    const basePlate = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.7, 0.04), plastikMat);
+    switchGroup.add(basePlate);
+    switchRocker = new THREE.Group(); switchRocker.position.z = 0.045; switchGroup.add(switchRocker);
+    const rockerTop = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.23, 0.04), plastikMat);
+    rockerTop.position.set(0, 0.115, 0.02); rockerTop.rotation.x = -0.15; switchRocker.add(rockerTop);
+    const rockerBottom = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.23, 0.04), plastikMat);
+    rockerBottom.position.set(0, -0.115, 0.02); rockerBottom.rotation.x = 0.15; switchRocker.add(rockerBottom);
+    switchMesh = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.8, 0.15), new THREE.MeshBasicMaterial({ visible: false }));
+    switchMesh.position.set(0, 0, 0.05); switchMesh.userData = { type: 'switch' };
+    switchGroup.add(switchMesh);
+    switchRocker.rotation.x = 0.2;
 }
 
 function updateClockTexture(timeStr) {
@@ -1118,18 +1316,39 @@ function updateClockTexture(timeStr) {
 function createPlayerModel(color = 0x44aaff, name = '') {
     const group = new THREE.Group();
     
+    // Тело (туловище)
     const bodyMat = new THREE.MeshStandardMaterial({ color: color, roughness: 0.6, metalness: 0.1 });
     const body = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.8, 0.4), bodyMat);
     body.position.y = 0.9;
     body.castShadow = true;
     group.add(body);
     
+    // Голова
     const headMat = new THREE.MeshStandardMaterial({ color: 0xffddbb, roughness: 0.7 });
     const head = new THREE.Mesh(new THREE.SphereGeometry(0.3, 8, 8), headMat);
     head.position.y = 1.5;
     head.castShadow = true;
     group.add(head);
     
+    // Глаза
+    const eyeMat = new THREE.MeshStandardMaterial({ color: 0xffffff });
+    const pupilMat = new THREE.MeshStandardMaterial({ color: 0x222222 });
+    
+    const eyeL = new THREE.Mesh(new THREE.SphereGeometry(0.08, 8, 8), eyeMat);
+    eyeL.position.set(-0.15, 1.55, -0.28);
+    group.add(eyeL);
+    const pupilL = new THREE.Mesh(new THREE.SphereGeometry(0.04, 8, 8), pupilMat);
+    pupilL.position.set(-0.15, 1.55, -0.32);
+    group.add(pupilL);
+    
+    const eyeR = new THREE.Mesh(new THREE.SphereGeometry(0.08, 8, 8), eyeMat);
+    eyeR.position.set(0.15, 1.55, -0.28);
+    group.add(eyeR);
+    const pupilR = new THREE.Mesh(new THREE.SphereGeometry(0.04, 8, 8), pupilMat);
+    pupilR.position.set(0.15, 1.55, -0.32);
+    group.add(pupilR);
+    
+    // Руки
     const armMat = new THREE.MeshStandardMaterial({ color: 0xffddbb, roughness: 0.7 });
     const armL = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.6, 0.12), armMat);
     armL.position.set(-0.4, 1.0, 0);
@@ -1138,6 +1357,7 @@ function createPlayerModel(color = 0x44aaff, name = '') {
     armR.position.set(0.4, 1.0, 0);
     group.add(armR);
     
+    // Ноги
     const legMat = new THREE.MeshStandardMaterial({ color: 0x334466, roughness: 0.7 });
     const legL = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.6, 0.2), legMat);
     legL.position.set(-0.2, 0.3, 0);
@@ -1146,12 +1366,14 @@ function createPlayerModel(color = 0x44aaff, name = '') {
     legR.position.set(0.2, 0.3, 0);
     group.add(legR);
     
+    // Имя над головой
     if (name) {
         const canvas = document.createElement('canvas');
         canvas.width = 256;
         canvas.height = 64;
         const ctx = canvas.getContext('2d');
         ctx.fillStyle = 'rgba(0,0,0,0.5)';
+        // Используем roundRect если доступен
         if (ctx.roundRect) {
             ctx.roundRect(10, 10, 236, 44, 10);
         } else {
@@ -1175,8 +1397,28 @@ function createPlayerModel(color = 0x44aaff, name = '') {
     return group;
 }
 
+function createGhostModel(color = 0x44aaff) {
+    const group = new THREE.Group();
+    const ghostMat = new THREE.MeshStandardMaterial({ 
+        color: color, 
+        transparent: true, 
+        opacity: 0.4,
+        emissive: new THREE.Color(color),
+        emissiveIntensity: 0.2,
+        roughness: 0.3
+    });
+    const body = new THREE.Mesh(new THREE.SphereGeometry(0.4, 8, 8), ghostMat);
+    body.position.y = 0.8;
+    body.scale.set(1, 1.2, 0.6);
+    group.add(body);
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.25, 8, 8), ghostMat);
+    head.position.y = 1.3;
+    group.add(head);
+    return group;
+}
+
 // ============================================================
-// 6. УПРАВЛЕНИЕ
+// 6. УПРАВЛЕНИЕ (без изменений)
 // ============================================================
 
 function setupControls() {
@@ -1219,6 +1461,7 @@ function setupControls() {
                     isPaused = false;
                     document.getElementById('pause-screen').style.display = 'none';
                     if (audioCtx.state === 'suspended') audioCtx.resume();
+                    if (isMobile) document.getElementById('mobile-lock-hint').style.display = 'none';
                 } else if (!isMobile) {
                     isPaused = true;
                     document.getElementById('pause-screen').style.display = 'flex';
@@ -1230,9 +1473,11 @@ function setupControls() {
     if (isMobile) setupMobileControls();
 }
 
-// === МОБИЛЬНЫЙ FULLSCREEN ===
+// === МОБИЛЬНЫЙ FULLSCREEN И ОРИЕНТАЦИЯ ===
+// === МОБИЛЬНЫЙ FULLSCREEN И ОРИЕНТАЦИЯ ===
 function handleMobileFullscreen() {
     if (isMobile) {
+        // Устанавливаем правильную высоту для мобильных (исправляет проблему с 100vh)
         function setVH() {
             const vh = window.innerHeight * 0.01;
             document.documentElement.style.setProperty('--vh', `${vh}px`);
@@ -1240,35 +1485,45 @@ function handleMobileFullscreen() {
         setVH();
         window.addEventListener('resize', setVH);
         
+        // Принудительный fullscreen при касании
         document.addEventListener('touchstart', () => {
-            if (document.documentElement.requestFullscreen && !document.fullscreenElement) {
+            if (document.documentElement.requestFullscreen && 
+                !document.fullscreenElement) {
                 document.documentElement.requestFullscreen().catch(() => {});
             }
         }, { passive: true });
         
+        // Следим за изменением ориентации
         if (window.screen && window.screen.orientation) {
             window.screen.orientation.addEventListener('change', () => {
                 setVH();
-                if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
+                // Пытаемся войти в fullscreen при повороте
+                if (!document.fullscreenElement && 
+                    document.documentElement.requestFullscreen) {
                     document.documentElement.requestFullscreen().catch(() => {});
                 }
             });
         }
         
+        // Следим за выходом из fullscreen — возвращаем обратно
         document.addEventListener('fullscreenchange', () => {
             if (!document.fullscreenElement && isMobile) {
+                // Пользователь вышел из fullscreen — пробуем вернуть
                 setTimeout(() => {
-                    if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
+                    if (!document.fullscreenElement && 
+                        document.documentElement.requestFullscreen) {
                         document.documentElement.requestFullscreen().catch(() => {});
                     }
                 }, 500);
             }
         });
         
+        // Запрещаем масштабирование жестами
         document.addEventListener('gesturestart', (e) => e.preventDefault());
         document.addEventListener('gesturechange', (e) => e.preventDefault());
         document.addEventListener('gestureend', (e) => e.preventDefault());
         
+        // Запрещаем двойной тап для зума
         let lastTouchEnd = 0;
         document.addEventListener('touchend', (e) => {
             const now = Date.now();
@@ -1277,16 +1532,27 @@ function handleMobileFullscreen() {
             }
             lastTouchEnd = now;
         }, { passive: false });
+        
+        // Исправляем проблему с прокруткой
+        document.addEventListener('touchmove', (e) => {
+            if (e.target.closest('#touch-joystick-area') || 
+                e.target.closest('#touch-look-area') ||
+                e.target.closest('#touch-interact')) {
+                return;
+            }
+            e.preventDefault();
+        }, { passive: false });
     }
 }
 
+// Вызываем при загрузке
 document.addEventListener('DOMContentLoaded', handleMobileFullscreen);
     
 function setupMobileControls() {
     const controls = document.getElementById('mobile-controls');
     controls.classList.add('active');
     const joystickArea = document.getElementById('touch-joystick-area');
-    const lookArea = document.getElementById('touch-look-area-mobile');
+    const lookArea = document.getElementById('touch-look-area');
     touchInteractBtn = document.getElementById('touch-interact');
     joystickKnob = document.getElementById('joystick-knob');
     const lockHint = document.getElementById('mobile-lock-hint');
@@ -1325,7 +1591,7 @@ function setupMobileControls() {
         moveState.w = false; moveState.s = false; moveState.a = false; moveState.d = false;
     }, { passive: false });
     
-    // Обзор на мобильных - вся правая половина экрана
+    // Для обзора на мобильных
     let touchLookActive = false;
     let touchLookStartX = 0, touchLookStartY = 0;
     
@@ -1390,7 +1656,7 @@ function updateJoystick(clientX, clientY) {
 }
 
 // ============================================================
-// 7. ИГРОВАЯ ЛОГИКА
+// 7. ИГРОВАЯ ЛОГИКА (с мультиплеерной синхронизацией)
 // ============================================================
 
 function handleInteraction() {
@@ -1406,50 +1672,37 @@ function handleInteraction() {
                 showEventText('🚪 Дверь заперта...', 2);
             }
         } else if (hoveredObject.userData.type === 'bed') {
-            showEventText('🛏️ Под кроватью темно...', 2);
-            if (horrorState.phase >= 1) {
-                showEventText('🛏️ Ты прячешься под кроватью...', 2);
-                const flash = document.getElementById('death-flash');
-                flash.style.opacity = '0.3';
-                setTimeout(() => { flash.style.opacity = '0'; }, 1000);
-            }
-        } else if (hoveredObject.userData.type === 'wardrobe') {
-            showEventText('🚪 Шкаф', 1);
-            if (horrorState.phase >= 1) {
-                showEventText('🚪 Ты прячешься в шкафу...', 2);
-                const flash = document.getElementById('death-flash');
-                flash.style.opacity = '0.3';
-                setTimeout(() => { flash.style.opacity = '0'; }, 1000);
-            }
+            showEventText('🛏️ На кровати старая фотография...', 2);
         } else if (hoveredObject.userData.type === 'switch') {
             if (horrorState.powerOutage) {
                 isCeilingLightOn = true;
                 horrorState.powerOutage = false;
-                if (ceilingPointLight) ceilingPointLight.intensity = 1.5;
-                if (ceilingBulbMat) ceilingBulbMat.emissive.setHex(0xffcc88);
-                if (switchRocker) switchRocker.rotation.x = -0.2;
-                if (ambientLight) ambientLight.intensity = 0.4;
-                if (mainLight) mainLight.intensity = 0.4;
+                ceilingPointLight.intensity = 1.5;
+                ceilingBulbMat.emissive.setHex(0xffcc88);
+                if(switchRocker) switchRocker.rotation.x = -0.2;
+                ambientLight.intensity = 0.4;
+                mainLight.intensity = 0.4;
                 showEventText('💡 Свет включен!', 1.5);
                 playClickSound();
                 document.getElementById('timer-warning').classList.remove('show');
             } else {
                 isCeilingLightOn = !isCeilingLightOn;
                 if (isCeilingLightOn) {
-                    if (ceilingPointLight) ceilingPointLight.intensity = 1.5;
-                    if (ceilingBulbMat) ceilingBulbMat.emissive.setHex(0xffcc88);
-                    if (switchRocker) switchRocker.rotation.x = -0.2;
-                    if (ambientLight) ambientLight.intensity = 0.4;
-                    if (mainLight) mainLight.intensity = 0.4;
+                    ceilingPointLight.intensity = 1.5;
+                    ceilingBulbMat.emissive.setHex(0xffcc88);
+                    if(switchRocker) switchRocker.rotation.x = -0.2;
+                    ambientLight.intensity = 0.4;
+                    mainLight.intensity = 0.4;
                 } else {
-                    if (ceilingPointLight) ceilingPointLight.intensity = 0;
-                    if (ceilingBulbMat) ceilingBulbMat.emissive.setHex(0x000000);
-                    if (switchRocker) switchRocker.rotation.x = 0.2;
-                    if (ambientLight) ambientLight.intensity = 0.05;
-                    if (mainLight) mainLight.intensity = 0.05;
+                    ceilingPointLight.intensity = 0;
+                    ceilingBulbMat.emissive.setHex(0x000000);
+                    if(switchRocker) switchRocker.rotation.x = 0.2;
+                    ambientLight.intensity = 0.05;
+                    mainLight.intensity = 0.05;
                 }
                 playClickSound();
             }
+            // Синхронизируем состояние света с сервером
             if (ws && ws.readyState === WebSocket.OPEN) {
                 ws.send(JSON.stringify({
                     type: 'light_toggle',
@@ -1506,6 +1759,7 @@ function triggerDeath(type) {
     
     playDeathSound();
     
+    // Сообщаем серверу о смерти
     if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: 'player_died' }));
     }
@@ -1526,9 +1780,11 @@ function triggerWin() {
     if(ambientOsc) { try { ambientOsc.stop(); } catch(e){} }
     stopBreathSound();
     
-    if (mainLight) { mainLight.color.setHex(0xffaa55); mainLight.intensity = 0.25; }
-    if (ambientLight) { ambientLight.color.setHex(0xffaa55); ambientLight.intensity = 0.1; }
-    if (scene) scene.fog.color.setHex(0x332211);
+    mainLight.color.setHex(0xffaa55);
+    mainLight.intensity = 0.25;
+    ambientLight.color.setHex(0xffaa55);
+    ambientLight.intensity = 0.1;
+    scene.fog.color.setHex(0x332211);
     
     playWinSound();
     document.getElementById('win-screen').style.display = 'flex';
@@ -1536,13 +1792,15 @@ function triggerWin() {
 }
 
 // ============================================================
-// 8. ОБНОВЛЕНИЕ ИГРЫ
+// 8. ОБНОВЛЕНИЕ ИГРЫ (с синхронизацией)
 // ============================================================
 
 function updateHorror(delta) {
     if (!gameActive || isPaused || horrorState.deathPending || isSpectator) return;
     
     const time = gameTimeSeconds;
+    const minutes = Math.floor(time / 60);
+    const seconds = Math.floor(time % 60);
     
     if (time < 90) horrorState.phase = 0;
     else if (time < 180) horrorState.phase = 1;
@@ -1585,7 +1843,7 @@ function updateHorror(delta) {
         }
     }
     
-    if (horrorState.flickerActive && isCeilingLightOn && ceilingPointLight) {
+    if (horrorState.flickerActive && isCeilingLightOn) {
         horrorState.flickerTimer += delta;
         const flickerInterval = horrorState.phase >= 2 ? 0.5 : 2.0;
         if (horrorState.flickerTimer > flickerInterval) {
@@ -1609,8 +1867,8 @@ function updateHorror(delta) {
             if (!horrorState.tvEvent) {
                 horrorState.tvEvent = true;
                 showEventText('📺 Телевизор включился! Отвернись!', 3);
-                if (tvScreenMat) tvScreenMat.color.setHex(0xffffff);
-                if (tvLight) tvLight.intensity = 1.5;
+                tvScreenMat.color.setHex(0xffffff);
+                tvLight.intensity = 1.5;
                 playTVStaticSound(3);
                 horrorState.tvWatched = true;
                 horrorState.tvWatchedTime = 0;
@@ -1627,8 +1885,8 @@ function updateHorror(delta) {
                 triggerDeath('tv');
                 return;
             } else if (angle > 0.8 && horrorState.tvWatchedTime > 2) {
-                if (tvScreenMat) tvScreenMat.color.setHex(0x000000);
-                if (tvLight) tvLight.intensity = 0;
+                tvScreenMat.color.setHex(0x000000);
+                tvLight.intensity = 0;
                 horrorState.tvWatched = false;
                 horrorState.tvEvent = false;
                 showEventText('✅ ТВ выключился', 1);
@@ -1689,6 +1947,7 @@ function updateHorror(delta) {
         warning.textContent = `⚠️ СВЕТ ВЫКЛЮЧЕН! ${Math.ceil(20 - horrorState.powerOutageTimer)}с`;
     }
     
+    // Отправляем позицию на сервер
     if (ws && ws.readyState === WebSocket.OPEN && gameActive && !isSpectator) {
         ws.send(JSON.stringify({
             type: 'player_update',
@@ -1705,11 +1964,11 @@ function triggerPowerOutage() {
     horrorState.powerOutageCount++;
     
     isCeilingLightOn = false;
-    if (ceilingPointLight) ceilingPointLight.intensity = 0;
-    if (ceilingBulbMat) ceilingBulbMat.emissive.setHex(0x000000);
-    if (switchRocker) switchRocker.rotation.x = 0.2;
-    if (ambientLight) ambientLight.intensity = 0.02;
-    if (mainLight) mainLight.intensity = 0.02;
+    ceilingPointLight.intensity = 0;
+    ceilingBulbMat.emissive.setHex(0x000000);
+    if(switchRocker) switchRocker.rotation.x = 0.2;
+    ambientLight.intensity = 0.02;
+    mainLight.intensity = 0.02;
     
     showEventText('💡 СВЕТ ОТКЛЮЧИЛИ! Найди выключатель!', 3);
     playDangerSound();
@@ -1726,8 +1985,6 @@ function triggerPowerOutage() {
 function updateRemotePlayers(players) {
     console.log('🔄 Обновление игроков:', players);
     
-    if (!scene) return;
-    
     // Удаляем старые модели
     for (const id in playerMeshes) {
         if (!players.find(p => p.id === id)) {
@@ -1737,14 +1994,14 @@ function updateRemotePlayers(players) {
     }
     
     for (const player of players) {
+        // Пропускаем себя
         if (player.id === myPlayerId) continue;
-        if (!player) continue;
         
         if (!playerMeshes[player.id]) {
             const color = player.color || 0x44aaff;
             const model = createPlayerModel(color, player.name || 'Игрок');
             
-            if (player.alive === false) {
+            if (!player.alive) {
                 model.children.forEach(child => {
                     if (child.material) {
                         child.material.transparent = true;
@@ -1759,8 +2016,10 @@ function updateRemotePlayers(players) {
         }
         
         const model = playerMeshes[player.id];
-        if (model && player && player.position) {
-            model.position.set(player.position.x, player.position.y, player.position.z);
+        if (model) {
+            if (player.position) {
+                model.position.set(player.position.x, player.position.y, player.position.z);
+            }
             if (player.rotation) {
                 model.rotation.set(0, player.rotation.yaw || 0, 0);
             }
@@ -1786,7 +2045,7 @@ function animate() {
     requestAnimationFrame(animate);
     const delta = clock.getDelta();
 
-    if (gameActive && !isPaused && !isSpectator && camera && scene) {
+    if (gameActive && !isPaused && !isSpectator) {
         gameTimeSeconds += delta;
         updateClockTexture(formatTime(gameTimeSeconds));
         updateHorror(delta);
@@ -1814,67 +2073,56 @@ function animate() {
         testZ.z += moveVec.z;
         if (!checkCollision(testZ)) camera.position.z += moveVec.z;
 
-        if (wardrobeMesh && noteMesh && doorMesh && bedMesh && switchMesh) {
-            raycaster.setFromCamera(centerVector, camera);
-            const intersects = raycaster.intersectObjects([wardrobeMesh, noteMesh, doorMesh, bedMesh, switchMesh]);
+        raycaster.setFromCamera(centerVector, camera);
+        const intersects = raycaster.intersectObjects([wardrobeMesh, noteMesh, doorMesh, bedMesh, switchMesh]);
+        
+        const hint = document.getElementById('interaction-hint');
+        const touchInteract = document.getElementById('touch-interact');
+        
+        if (intersects.length > 0 && intersects[0].distance < 4.0) {
+            hoveredObject = intersects[0].object;
+            let text = "";
+            if (hoveredObject.userData.type === 'note') text = "📄 ЛКМ - Посмотреть фото";
+            else if (hoveredObject.userData.type === 'wardrobe') {
+                text = "🚪 ЛКМ - Шкаф";
+                if (horrorState.phase >= 2) text += " (убежище)";
+            }
+            else if (hoveredObject.userData.type === 'door') text = "🚪 ЛКМ - Выйти";
+            else if (hoveredObject.userData.type === 'bed') text = "🛏️ ЛКМ - Кровать";
+            else if (hoveredObject.userData.type === 'switch') {
+                text = horrorState.powerOutage ? "💡 ЛКМ - Включить свет!" : (isCeilingLightOn ? "🔆 ЛКМ - Выключить свет" : "🔅 ЛКМ - Включить свет");
+            }
             
-            const hint = document.getElementById('interaction-hint');
-            const touchInteract = document.getElementById('touch-interact');
-            
-            if (intersects.length > 0 && intersects[0].distance < 4.0) {
-                hoveredObject = intersects[0].object;
-                let text = "";
-                if (hoveredObject.userData.type === 'note') text = "📄 ЛКМ - Посмотреть фото";
-                else if (hoveredObject.userData.type === 'wardrobe') {
-                    text = "🚪 ЛКМ - Шкаф (спрятаться)";
-                }
-                else if (hoveredObject.userData.type === 'door') text = "🚪 ЛКМ - Выйти";
-                else if (hoveredObject.userData.type === 'bed') text = "🛏️ ЛКМ - Под кровать (спрятаться)";
-                else if (hoveredObject.userData.type === 'switch') {
-                    text = horrorState.powerOutage ? "💡 ЛКМ - Включить свет!" : (isCeilingLightOn ? "🔆 ЛКМ - Выключить свет" : "🔅 ЛКМ - Включить свет");
-                }
-                
-                if (!isMobile) {
-                    hint.innerText = text;
-                    hint.style.display = 'block';
-                } else {
-                    touchInteract.innerText = text.replace('ЛКМ - ', '');
-                    touchInteract.classList.add('active');
-                }
+            if (!isMobile) {
+                hint.innerText = text;
+                hint.style.display = 'block';
             } else {
-                hoveredObject = null;
-                if (!isMobile) {
-                    hint.style.display = 'none';
-                } else {
-                    touchInteract.classList.remove('active');
-                }
+                touchInteract.innerText = text.replace('ЛКМ - ', '');
+                touchInteract.classList.add('active');
+            }
+        } else {
+            hoveredObject = null;
+            if (!isMobile) {
+                hint.style.display = 'none';
+            } else {
+                touchInteract.classList.remove('active');
             }
         }
     }
 
-    if (renderer && scene && camera && renderTarget && postScene && postCamera) {
-        renderer.setRenderTarget(renderTarget);
-        renderer.render(scene, camera);
-        renderer.setRenderTarget(null);
-        
-        if (postMaterial) {
-            postMaterial.uniforms.time.value += delta;
-        }
-        renderer.render(postScene, postCamera);
-    }
+    renderer.setRenderTarget(renderTarget);
+    renderer.render(scene, camera);
+    renderer.setRenderTarget(null);
+    
+    postMaterial.uniforms.time.value += delta;
+    renderer.render(postScene, postCamera);
 }
 
 function onWindowResize() {
-    if (camera) {
-        camera.aspect = window.innerWidth / window.innerHeight;
-        camera.updateProjectionMatrix();
-    }
-    if (renderer) {
-        renderer.setSize(window.innerWidth, window.innerHeight);
-    }
-    if (renderTarget) {
-        renderTarget.setSize(window.innerWidth, window.innerHeight);
-    }
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderTarget.setSize(window.innerWidth, window.innerHeight);
 }
 
 // ============================================================
@@ -2004,107 +2252,44 @@ function playVideoScene() {
 // 12. ЗАПУСК ИГРЫ
 // ============================================================
 
-// ИСПРАВЛЕНИЕ: Функция полного запуска игры (создает сцену с нуля)
-function startGameFull() {
-    initAudio();
-    init3D(); // Создает сцену и все 3D объекты
-    gameActive = true;
-    clock.start();
-    isSpectator = false;
-    
-    if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({
-            type: 'request_players'
-        }));
-    }
-    
-    horrorState = {
-        phase: 0, tvEvent: false, tvEventTimer: 0, tvWatched: false, tvWatchedTime: 0,
-        knockEvent: false, knockTimer: 0, knockActive: false,
-        powerOutage: false, powerOutageTimer: 0, powerOutageCount: 0,
-        isInCloset: false, lastMoveTime: 0, isStandingStill: false, standStillTimer: 0,
-        deathPending: false, deathType: '', eventTextTimeout: null,
-        flickerTimer: 0, flickerActive: false, lightFlickerTimer: 0,
-    };
-    
-    if (!animationRunning) {
-        animationRunning = true;
-        animate();
-    }
-    
-    setTimeout(() => {
-        if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({
-                type: 'player_update',
-                position: { x: camera.position.x, y: camera.position.y, z: camera.position.z },
-                rotation: { pitch, yaw }
-            }));
-        }
-    }, 100);
-    
-    if (isMobile) {
-        document.getElementById('mobile-lock-hint').style.display = 'block';
-        setTimeout(() => {
-            if (document.pointerLockElement !== document.body) {
-                document.body.requestPointerLock();
-            }
-        }, 500);
-    } else {
-        document.body.requestPointerLock();
-    }
-}
-
-// ИСПРАВЛЕНИЕ: Функция запуска игры без пересоздания сцены
-function startGameWithoutReinit() {
-    gameActive = true;
-    clock.start();
-    isSpectator = false;
-    
-    if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({
-            type: 'request_players'
-        }));
-    }
-    
-    horrorState = {
-        phase: 0, tvEvent: false, tvEventTimer: 0, tvWatched: false, tvWatchedTime: 0,
-        knockEvent: false, knockTimer: 0, knockActive: false,
-        powerOutage: false, powerOutageTimer: 0, powerOutageCount: 0,
-        isInCloset: false, lastMoveTime: 0, isStandingStill: false, standStillTimer: 0,
-        deathPending: false, deathType: '', eventTextTimeout: null,
-        flickerTimer: 0, flickerActive: false, lightFlickerTimer: 0,
-    };
-    
-    if (!animationRunning) {
-        animationRunning = true;
-        animate();
-    }
-    
-    setTimeout(() => {
-        if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({
-                type: 'player_update',
-                position: { x: camera.position.x, y: camera.position.y, z: camera.position.z },
-                rotation: { pitch, yaw }
-            }));
-        }
-    }, 100);
-    
-    if (isMobile) {
-        document.getElementById('mobile-lock-hint').style.display = 'block';
-        setTimeout(() => {
-            if (document.pointerLockElement !== document.body) {
-                document.body.requestPointerLock();
-            }
-        }, 500);
-    } else {
-        document.body.requestPointerLock();
-    }
-}
-
-// Старая функция startGame теперь вызывает startGameFull
 async function startGame() {
-    startGameFull();
+    initAudio();
+    init3D();
+    gameActive = true;
+    clock.start();
+    isSpectator = false;
+    
+    // ВАЖНО: синхронизируем игроков при старте
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+            type: 'request_players'
+        }));
+    }
+    
+    horrorState = {
+        phase: 0, tvEvent: false, tvEventTimer: 0, tvWatched: false, tvWatchedTime: 0,
+        knockEvent: false, knockTimer: 0, knockActive: false,
+        powerOutage: false, powerOutageTimer: 0, powerOutageCount: 0,
+        isInCloset: false, lastMoveTime: 0, isStandingStill: false, standStillTimer: 0,
+        deathPending: false, deathType: '', eventTextTimeout: null,
+        flickerTimer: 0, flickerActive: false, lightFlickerTimer: 0,
+    };
+    
+    if (!animationRunning) {
+        animationRunning = true;
+        animate();
+    }
+    
+    if (isMobile) {
+        document.getElementById('mobile-lock-hint').style.display = 'block';
+        setTimeout(() => {
+            if (document.pointerLockElement !== document.body) {
+                document.body.requestPointerLock();
+            }
+        }, 500);
+    } else {
+        document.body.requestPointerLock();
+    }
 }
 
 function resetGame() {
@@ -2139,8 +2324,9 @@ function resetGame() {
     document.getElementById('timer-warning').classList.remove('show');
     document.getElementById('breath-indicator').classList.remove('show');
     
+    // Удаляем модели других игроков
     for (const id in playerMeshes) {
-        if (scene) scene.remove(playerMeshes[id]);
+        scene.remove(playerMeshes[id]);
         delete playerMeshes[id];
     }
     
@@ -2159,6 +2345,7 @@ function resetGame() {
     updateClockTexture("00:00");
     init3D();
     
+    // Сообщаем серверу о перезапуске
     if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: 'restart_game' }));
     }
@@ -2184,6 +2371,7 @@ document.getElementById('btn-resume').addEventListener('click', () => {
 document.getElementById('btn-restart').addEventListener('click', resetGame);
 document.getElementById('btn-restart-win').addEventListener('click', resetGame);
 
+// Настройка мобильных контролов
 if (isMobile) {
     document.getElementById('mobile-controls').classList.add('active');
     document.getElementById('interaction-hint').style.display = 'none';
