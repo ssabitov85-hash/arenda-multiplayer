@@ -2049,15 +2049,6 @@ function updateRemotePlayers(players) {
             const color = player.color || 0x44aaff;
             const model = createPlayerModel(color, player.name || 'Игрок');
             
-            if (!player.alive) {
-                model.children.forEach(child => {
-                    if (child.material) {
-                        child.material.transparent = true;
-                        child.material.opacity = 0.3;
-                    }
-                });
-            }
-            
             if (scene) scene.add(model);
             playerMeshes[player.id] = model;
             console.log('✅ Создана модель для:', player.name, player.id);
@@ -2066,19 +2057,17 @@ function updateRemotePlayers(players) {
         const model = playerMeshes[player.id];
         if (model) {
             if (player.position) {
-                model.position.set(player.position.x, player.position.y, player.position.z);
+                // ВАЖНО: Ставим игрока на уровень пола (1.0 - это средний рост человека).
+                // Раньше он брал 5.0 из-за камеры и висел в воздухе.
+                model.position.set(
+                    player.position.x, 
+                    1.0,  // <--- ЭТА СТРОКА ВСЁ ИСПРАВЛЯЕТ!
+                    player.position.z
+                );
             }
             if (player.rotation) {
                 model.rotation.set(0, player.rotation.yaw || 0, 0);
             }
-            
-            const isAlive = player.alive !== false;
-            model.children.forEach(child => {
-                if (child.material) {
-                    child.material.transparent = true;
-                    child.material.opacity = isAlive ? 1 : 0.3;
-                }
-            });
         }
     }
 }
