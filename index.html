@@ -1204,6 +1204,18 @@ function buildRoom() {
     wardrobeMesh.castShadow = true; wardrobeMesh.receiveShadow = true;
     wardrobeMesh.userData = { type: 'wardrobe' };
     scene.add(wardrobeMesh);
+    
+    // Дверца шкафа (для анимации открытия)
+    const doorWardrobe = new THREE.Mesh(new THREE.BoxGeometry(0.1, 7.5, 1.4), woodMat);
+    doorWardrobe.position.set(8, 4, -6.7);
+    doorWardrobe.userData = { type: 'wardrobeDoor' };
+    scene.add(doorWardrobe);
+    
+    // Добавляем ручку на дверцу
+    const handleWardrobe = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.2, 8), new THREE.MeshStandardMaterial({ color: 0xaaaaaa, metalness: 0.8 }));
+    handleWardrobe.rotation.x = Math.PI / 2;
+    handleWardrobe.position.set(8, 4, -6.1);
+    scene.add(handleWardrobe);
 
     // Дверь
     const doorMat = new THREE.MeshStandardMaterial({ color: 0x4a3a2a, roughness: 0.85 });
@@ -1248,6 +1260,12 @@ function buildRoom() {
     bedMesh.position.set(bedX, 1.2, bedZ);
     bedMesh.userData = { type: 'bed' };
     scene.add(bedMesh);
+    
+    // Место под кроватью (для прятанья)
+    const underBed = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.1), new THREE.MeshBasicMaterial({ visible: false }));
+    underBed.position.set(bedX, 0.3, bedZ);
+    underBed.userData = { type: 'underBed' };
+    scene.add(underBed);
 
     // Стол
     const table = new THREE.Mesh(new THREE.BoxGeometry(2, 2.5, 2), woodMat);
@@ -1671,8 +1689,25 @@ function handleInteraction() {
             } else {
                 showEventText('🚪 Дверь заперта...', 2);
             }
-        } else if (hoveredObject.userData.type === 'bed') {
-            showEventText('🛏️ На кровати старая фотография...', 2);
+        } else if (hoveredObject.userData.type === 'bed' || hoveredObject.userData.type === 'underBed') {
+            showEventText('🛏️ Под кроватью темно...', 2);
+            // Спрятаться под кровать
+            if (horrorState.phase >= 1) {
+                showEventText('🛏️ Ты прячешься под кроватью...', 2);
+                // Визуальный эффект - затемнение
+                const flash = document.getElementById('death-flash');
+                flash.style.opacity = '0.3';
+                setTimeout(() => { flash.style.opacity = '0'; }, 1000);
+            }
+        } else if (hoveredObject.userData.type === 'wardrobe') {
+            showEventText('🚪 Шкаф', 1);
+            // Спрятаться в шкафу
+            if (horrorState.phase >= 1) {
+                showEventText('🚪 Ты прячешься в шкафу...', 2);
+                const flash = document.getElementById('death-flash');
+                flash.style.opacity = '0.3';
+                setTimeout(() => { flash.style.opacity = '0'; }, 1000);
+            }
         } else if (hoveredObject.userData.type === 'switch') {
             if (horrorState.powerOutage) {
                 isCeilingLightOn = true;
@@ -2084,11 +2119,10 @@ function animate() {
             let text = "";
             if (hoveredObject.userData.type === 'note') text = "📄 ЛКМ - Посмотреть фото";
             else if (hoveredObject.userData.type === 'wardrobe') {
-                text = "🚪 ЛКМ - Шкаф";
-                if (horrorState.phase >= 2) text += " (убежище)";
+                text = "🚪 ЛКМ - Шкаф (спрятаться)";
             }
             else if (hoveredObject.userData.type === 'door') text = "🚪 ЛКМ - Выйти";
-            else if (hoveredObject.userData.type === 'bed') text = "🛏️ ЛКМ - Кровать";
+            else if (hoveredObject.userData.type === 'bed') text = "🛏️ ЛКМ - Под кровать (спрятаться)";
             else if (hoveredObject.userData.type === 'switch') {
                 text = horrorState.powerOutage ? "💡 ЛКМ - Включить свет!" : (isCeilingLightOn ? "🔆 ЛКМ - Выключить свет" : "🔅 ЛКМ - Включить свет");
             }
