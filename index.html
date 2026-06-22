@@ -1472,7 +1472,7 @@ function setupControls() {
             // Выход из-под кровати на SPACE
             if (e.code === 'Space' && horrorState.isUnderBed && gameActive && !isSpectator) {
                 e.preventDefault();
-                camera.position.set(bedMesh.position.x, 5, bedMesh.position.z + 3);
+                camera.position.set(0, 5, 0);
                 horrorState.isUnderBed = false;
                 showEventText('✅ Вы вылезли', 1);
                 return;
@@ -1685,7 +1685,7 @@ function setupMobileControls() {
         e.preventDefault();
         e.stopPropagation();
         if (horrorState.isUnderBed && gameActive && !isSpectator) {
-            camera.position.set(bedMesh.position.x, 5, bedMesh.position.z + 3);
+            camera.position.set(0, 5, 0);
             horrorState.isUnderBed = false;
             crawlBtn.style.display = 'none';
             showEventText('✅ Вы вылезли', 1);
@@ -1766,65 +1766,78 @@ function setupMobileControls() {
 function handleInteraction() {
     const photoUI = document.getElementById('photo-ui');
     if (photoUI.style.display === 'block') { photoUI.style.display = 'none'; return; }
-    if (hoveredObject && gameActive && !isPaused && !isSpectator) {
-        if (hoveredObject.userData.type === 'note') {
-            document.getElementById('photo-ui').style.display = 'block';
-        } else if (hoveredObject.userData.type === 'wardrobe') {
-            const w = wardrobeMesh.userData;
-            w.doorOpen = !w.doorOpen;
-            w.doors[0].rotation.y = w.doorOpen ? -Math.PI/2 : 0;
-            w.doors[1].rotation.y = w.doorOpen ? Math.PI/2 : 0;
-            if (w.doorOpen) {
-                camera.position.set(wardrobeMesh.position.x, 2.5, wardrobeMesh.position.z);
-                horrorState.isInCloset = true;
-                showEventText('🚪 Вы в шкафу. Нажмите ещё раз чтобы выйти', 2);
-            } else {
-                camera.position.set(wardrobeMesh.position.x + 1.5, 5, wardrobeMesh.position.z);
-                horrorState.isInCloset = false;
-            }
-        } else if (hoveredObject.userData.type === 'door') {
-            if (horrorState.phase >= 2) triggerDeath('door');
-            else showEventText('🚪 Дверь заперта...', 2);
-        } else if (hoveredObject.userData.type === 'bed') {
-            camera.position.set(bedMesh.position.x, 0.3, bedMesh.position.z);
-            horrorState.isUnderBed = true;
-            showEventText('🛏️ Вы под кроватью. Нажмите SPACE (или кнопку) чтобы вылезти', 2);
-        } else if (hoveredObject.userData.type === 'switch') {
-            if (horrorState.powerOutage) {
-                isCeilingLightOn = true;
-                horrorState.powerOutage = false;
+    if (!gameActive || isPaused || isSpectator) return;
+    
+    // Проверяем hoveredObject и его родителя для шкафа
+    let target = hoveredObject;
+    if (!target) return;
+    
+    // Поднимаемся по иерархии для поиска userData
+    let wardrobeParent = target;
+    while (wardrobeParent && wardrobeParent.parent) {
+        if (wardrobeParent.userData && wardrobeParent.userData.type === 'wardrobe') {
+            target = wardrobeParent;
+            break;
+        }
+        wardrobeParent = wardrobeParent.parent;
+    }
+    
+    if (target.userData && target.userData.type === 'note') {
+        document.getElementById('photo-ui').style.display = 'block';
+    } else if (target.userData && target.userData.type === 'wardrobe') {
+        const w = target.userData;
+        w.doorOpen = !w.doorOpen;
+        w.doors[0].rotation.y = w.doorOpen ? -Math.PI/2 : 0;
+        w.doors[1].rotation.y = w.doorOpen ? Math.PI/2 : 0;
+        if (w.doorOpen) {
+            camera.position.set(wardrobeMesh.position.x, 2.5, wardrobeMesh.position.z);
+            horrorState.isInCloset = true;
+            showEventText('🚪 Вы в шкафу. Нажмите ещё раз чтобы выйти', 2);
+        } else {
+            camera.position.set(wardrobeMesh.position.x + 1.5, 5, wardrobeMesh.position.z);
+            horrorState.isInCloset = false;
+        }
+    } else if (target.userData && target.userData.type === 'door') {
+        if (horrorState.phase >= 2) triggerDeath('door');
+        else showEventText('🚪 Дверь заперта...', 2);
+    } else if (target.userData && target.userData.type === 'bed') {
+        camera.position.set(bedMesh.position.x, 0.3, bedMesh.position.z);
+        horrorState.isUnderBed = true;
+        showEventText('🛏️ Вы под кроватью. Нажмите SPACE (или кнопку) чтобы вылезти', 2);
+    } else if (target.userData && target.userData.type === 'switch') {
+        if (horrorState.powerOutage) {
+            isCeilingLightOn = true;
+            horrorState.powerOutage = false;
+            ceilingPointLight.intensity = 1.5;
+            ceilingBulbMat.emissive.setHex(0xffcc88);
+            if(switchRocker) switchRocker.rotation.x = -0.2;
+            ambientLight.intensity = 0.4;
+            mainLight.intensity = 0.4;
+            showEventText('💡 Свет включен!', 1.5);
+            playClickSound();
+            document.getElementById('timer-warning').classList.remove('show');
+        } else {
+            isCeilingLightOn = !isCeilingLightOn;
+            if (isCeilingLightOn) {
                 ceilingPointLight.intensity = 1.5;
                 ceilingBulbMat.emissive.setHex(0xffcc88);
                 if(switchRocker) switchRocker.rotation.x = -0.2;
                 ambientLight.intensity = 0.4;
                 mainLight.intensity = 0.4;
-                showEventText('💡 Свет включен!', 1.5);
-                playClickSound();
-                document.getElementById('timer-warning').classList.remove('show');
             } else {
-                isCeilingLightOn = !isCeilingLightOn;
-                if (isCeilingLightOn) {
-                    ceilingPointLight.intensity = 1.5;
-                    ceilingBulbMat.emissive.setHex(0xffcc88);
-                    if(switchRocker) switchRocker.rotation.x = -0.2;
-                    ambientLight.intensity = 0.4;
-                    mainLight.intensity = 0.4;
-                } else {
-                    ceilingPointLight.intensity = 0;
-                    ceilingBulbMat.emissive.setHex(0x000000);
-                    if(switchRocker) switchRocker.rotation.x = 0.2;
-                    ambientLight.intensity = 0.05;
-                    mainLight.intensity = 0.05;
-                }
-                playClickSound();
+                ceilingPointLight.intensity = 0;
+                ceilingBulbMat.emissive.setHex(0x000000);
+                if(switchRocker) switchRocker.rotation.x = 0.2;
+                ambientLight.intensity = 0.05;
+                mainLight.intensity = 0.05;
             }
-            // Синхронизируем состояние света с сервером
-            if (ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({
-                    type: 'light_toggle',
-                    isOn: isCeilingLightOn
-                }));
-            }
+            playClickSound();
+        }
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({
+                type: 'light_toggle',
+                isOn: isCeilingLightOn
+            }));
         }
     }
 }
@@ -2148,7 +2161,7 @@ function animate() {
     const delta = gameClock.getDelta();
 
     if (gameActive && !isPaused && !isSpectator) {
-                // Показ/скрытие кнопки вылезти
+        // Показ/скрытие кнопки вылезти
         if (isMobile) {
             const crawlBtn = document.getElementById('touch-crawl');
             if (crawlBtn) crawlBtn.style.display = horrorState.isUnderBed ? 'flex' : 'none';
@@ -2186,17 +2199,42 @@ function animate() {
         const hint = document.getElementById('interaction-hint');
         const touchInteract = document.getElementById('touch-interact');
         
-        if (intersects.length > 0 && intersects[0].distance < 4.0) {
-            hoveredObject = intersects[0].object;
+        // Фильтруем пересечения — ищем объект с валидным userData
+        let validIntersect = null;
+        for (const intersect of intersects) {
+            if (intersect.distance < 4.0) {
+                let obj = intersect.object;
+                let foundType = obj.userData && obj.userData.type;
+                
+                // Поднимаемся по иерархии для Group-объектов (шкаф)
+                if (!foundType && obj.parent && obj.parent.userData && obj.parent.userData.type) {
+                    foundType = obj.parent.userData.type;
+                    obj = obj.parent;
+                }
+                // Ещё один уровень вверх (для дверок шкафа)
+                if (!foundType && obj.parent && obj.parent.parent && obj.parent.parent.userData && obj.parent.parent.userData.type) {
+                    foundType = obj.parent.parent.userData.type;
+                    obj = obj.parent.parent;
+                }
+                
+                if (foundType) {
+                    validIntersect = obj;
+                    break;
+                }
+            }
+        }
+        
+        if (validIntersect) {
+            hoveredObject = validIntersect;
             let text = "";
-            if (hoveredObject.userData.type === 'note') text = "📄 ЛКМ - Посмотреть фото";
-            else if (hoveredObject.userData.type === 'wardrobe') {
+            if (validIntersect.userData.type === 'note') text = "📄 ЛКМ - Посмотреть фото";
+            else if (validIntersect.userData.type === 'wardrobe') {
                 text = "🚪 ЛКМ - Шкаф";
                 if (horrorState.phase >= 2) text += " (убежище)";
             }
-            else if (hoveredObject.userData.type === 'door') text = "🚪 ЛКМ - Выйти";
-            else if (hoveredObject.userData.type === 'bed') text = "🛏️ ЛКМ - Кровать";
-            else if (hoveredObject.userData.type === 'switch') {
+            else if (validIntersect.userData.type === 'door') text = "🚪 ЛКМ - Выйти";
+            else if (validIntersect.userData.type === 'bed') text = "🛏️ ЛКМ - Кровать";
+            else if (validIntersect.userData.type === 'switch') {
                 text = horrorState.powerOutage ? "💡 ЛКМ - Включить свет!" : (isCeilingLightOn ? "🔆 ЛКМ - Выключить свет" : "🔅 ЛКМ - Включить свет");
             }
             
@@ -2224,16 +2262,15 @@ function animate() {
                 type: 'player_update',
                 position: { 
                     x: camera.position.x, 
-                    y: 0, // <--- ЗДЕСЬ ТЕПЕРЬ 0 (ПОЛ), А НЕ camera.position.y
+                    y: 0,
                     z: camera.position.z 
                 },
                 rotation: { pitch, yaw }
             }));
         }
 
-        // === ДОБАВЛЕНО: Плавное обновление джойстика в каждом кадре ===
+        // Плавное обновление джойстика
         if (isMobile && touchJoystickActive && gameActive) {
-            // Если джойстик активен, но палец не двигается, он должен мягко держать позицию
             // Плавность уже реализована в updateJoystick через * 0.3
         }
     }
