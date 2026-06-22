@@ -8,8 +8,8 @@
 body, html { 
     margin: 0; 
     padding: 0; 
-    width: 100%; 
-    height: 100%; 
+    width: 100vw;  /* Жесткая ширина экрана */
+    height: 100vh; /* Жесткая высота экрана */
     overflow: hidden; 
     background-color: #000; 
     font-family: 'Courier New', Courier, monospace; 
@@ -18,11 +18,13 @@ body, html {
     position: fixed;
     top: 0;
     left: 0;
-    right: 0;
-    bottom: 0;
 }
 
-canvas { display: block; }
+canvas { 
+    display: block; 
+    width: 100vw;   /* Растягиваем канвас на всю ширину */
+    height: 100vh;  /* Растягиваем канвас на всю высоту */
+}
 
 /* Запрещаем масштабирование на мобильных */
 * {
@@ -32,21 +34,12 @@ canvas { display: block; }
     user-select: none;
 }
 
-/* === ПОЛНОЭКРАННЫЙ РЕЖИМ ДЛЯ МОБИЛЬНЫХ === */
-/* Принудительно fullscreen на мобильных в любой ориентации */
+/* Убираем все эти calc(var(--vh) ...) для мобильных, они только мешают */
 @media (max-width: 1024px) {
     body, html {
-        position: fixed;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        width: 100%;
-        height: 100%;
-        overflow: hidden;
-        /* Исправляем проблему с высотой на мобильных */
-        height: calc(var(--vh, 1vh) * 100);
-        min-height: -webkit-fill-available;
+        width: 100vw;
+        height: 100vh;
+        /* Убираем min-height и calc */
     }
     
     #start-screen, 
@@ -56,10 +49,8 @@ canvas { display: block; }
     #win-screen,
     #pause-screen,
     #video-scene {
-        width: 100%;
-        height: 100%;
-        height: calc(var(--vh, 1vh) * 100);
-        min-height: -webkit-fill-available;
+        width: 100vw;
+        height: 100vh;
         position: fixed;
         top: 0;
         left: 0;
@@ -1579,10 +1570,13 @@ function setupMobileControls() {
     if (lookArea) lookArea.style.display = 'none';
     
     // === ДЖОЙСТИК ДВИЖЕНИЯ (левая сторона) ===
+    let joystickTouchId = null;
+    
     joystickArea.addEventListener('touchstart', (e) => {
         e.preventDefault();
         if (!gameActive || isSpectator) return;
         const touch = e.touches[0];
+        joystickTouchId = touch.identifier;
         const rect = joystickArea.getBoundingClientRect();
         touchJoystickStartX = rect.left + rect.width / 2;
         touchJoystickStartY = rect.top + rect.height / 2;
@@ -1593,8 +1587,12 @@ function setupMobileControls() {
     joystickArea.addEventListener('touchmove', (e) => {
         e.preventDefault();
         if (!touchJoystickActive || !gameActive || isSpectator) return;
-        const touch = e.touches[0];
-        updateJoystick(touch.clientX, touch.clientY);
+        for (let i = 0; i < e.changedTouches.length; i++) {
+            if (e.changedTouches[i].identifier === joystickTouchId) {
+                updateJoystick(e.changedTouches[i].clientX, e.changedTouches[i].clientY);
+                break;
+            }
+        }
     }, { passive: false });
     
     joystickArea.addEventListener('touchend', (e) => {
@@ -1603,109 +1601,39 @@ function setupMobileControls() {
         touchJoystick.x = 0; touchJoystick.y = 0;
         if (joystickKnob) joystickKnob.style.transform = 'translate(-50%, -50%)';
         moveState.w = false; moveState.s = false; moveState.a = false; moveState.d = false;
+        joystickTouchId = null;
     }, { passive: false });
     
-    // === СВОБОДНЫЙ ПОВОРОТ КАМЕРЫ (правая половина экрана) ===
-    let lookTouchId = null;
-    let lookStartX = 0, lookStartY = 0;
-    
-    document.addEventListener('touchstart', (e) => {
-        if (!gameActive || isSpectator) return;
+    // Функция обновления джойстика с защитой от рывков
+    function updateJoystick(clientX, clientY) {
+        const dx = clientX - touchJoystickStartX;
+        const dy = clientY - touchJoystickStartY;
+        const maxRadius = 50; // Радиус круга джойстика
+        const distance = Math.sqrt(dx*dx + dy*dy);
         
-        // Ищем касание в правой половине экрана
-        for (let i = 0; i < e.changedTouches.length; i++) {
-            const touch = e.changedTouches[i];
-            const screenMidX = window.innerWidth / 2;
-            
-            // Если касание справа и не на джойстике и не на кнопке взаимодействия
-            if (touch.clientX > screenMidX && 
-                !touch.target.closest('#touch-joystick-area') &&
-                !touch.target.closest('#touch-interact')) {
-                
-                lookTouchId = touch.identifier;
-                lookStartX = touch.clientX;
-                lookStartY = touch.clientY;
-                e.preventDefault();
-                return;
-            }
+        let normX = 0, normY = 0;
+        if (distance > 5) {
+            const clamped = Math.min(distance, maxRadius);
+            normX = (dx / distance) * (clamped / maxRadius);
+            normY = (dy / distance) * (clamped / maxRadius);
         }
-    }, { passive: false });
-    
-    document.addEventListener('touchmove', (e) => {
-        if (!gameActive || isSpectator || lookTouchId === null) return;
         
-        for (let i = 0; i < e.changedTouches.length; i++) {
-            const touch = e.changedTouches[i];
-            if (touch.identifier === lookTouchId) {
-                const dx = touch.clientX - lookStartX;
-                const dy = touch.clientY - lookStartY;
-                
-                const sensitivity = 0.005; // Чувствительность поворота
-                yaw -= dx * sensitivity;
-                pitch += dy * sensitivity;
-                
-                // Ограничиваем угол обзора
-                pitch = Math.max(-Math.PI/2 + 0.1, Math.min(Math.PI/2 - 0.1, pitch));
-                camera.rotation.set(pitch, yaw, 0, 'YXZ');
-                
-                lookStartX = touch.clientX;
-                lookStartY = touch.clientY;
-                e.preventDefault();
-                return;
-            }
+        // Применяем сглаживание (Smooth Interpolation), чтобы джойстик не дергался
+        touchJoystick.x += (normX - touchJoystick.x) * 0.3;
+        touchJoystick.y += (normY - touchJoystick.y) * 0.3;
+        
+        if (joystickKnob) {
+            const knobX = touchJoystick.x * maxRadius;
+            const knobY = touchJoystick.y * maxRadius;
+            joystickKnob.style.transform = `translate(calc(-50% + ${knobX}px), calc(-50% + ${knobY}px))`;
         }
-    }, { passive: false });
-    
-    document.addEventListener('touchend', (e) => {
-        for (let i = 0; i < e.changedTouches.length; i++) {
-            if (e.changedTouches[i].identifier === lookTouchId) {
-                lookTouchId = null;
-                return;
-            }
-        }
-    });
-    
-    // === КНОПКА ВЗАИМОДЕЙСТВИЯ ===
-    touchInteractBtn.addEventListener('touchstart', (e) => {
-        e.preventDefault();
-        if (!gameActive || isSpectator) return;
-        handleInteraction();
-    }, { passive: false });
-    
-    // Запрос блокировки экрана при старте
-    document.addEventListener('touchstart', (e) => {
-        if (gameActive && document.pointerLockElement !== document.body && !isSpectator) {
-            document.body.requestPointerLock();
-            lockHint.style.display = 'none';
-            if (audioCtx.state === 'suspended') audioCtx.resume();
-        }
-    }, { passive: true });
-}
-
-function updateJoystick(clientX, clientY) {
-    const dx = clientX - touchJoystickStartX;
-    const dy = clientY - touchJoystickStartY;
-    const maxRadius = 50;
-    const distance = Math.sqrt(dx*dx + dy*dy);
-    let normX = 0, normY = 0;
-    if (distance > 5) {
-        const clamped = Math.min(distance, maxRadius);
-        normX = (dx / distance) * (clamped / maxRadius);
-        normY = (dy / distance) * (clamped / maxRadius);
+        
+        const deadZone = 0.15;
+        moveState.w = touchJoystick.y < -deadZone;
+        moveState.s = touchJoystick.y > deadZone;
+        moveState.a = touchJoystick.x < -deadZone;
+        moveState.d = touchJoystick.x > deadZone;
     }
-    touchJoystick.x = normX; touchJoystick.y = normY;
-    if (joystickKnob) {
-        const knobX = normX * maxRadius;
-        const knobY = normY * maxRadius;
-        joystickKnob.style.transform = `translate(calc(-50% + ${knobX}px), calc(-50% + ${knobY}px))`;
-    }
-    const deadZone = 0.15;
-    const rawX = normX, rawY = normY;
-    moveState.w = rawY < -deadZone;
-    moveState.s = rawY > deadZone;
-    moveState.a = rawX < -deadZone;
-    moveState.d = rawX > deadZone;
-}
 
 // ============================================================
 // 7. ИГРОВАЯ ЛОГИКА (с мультиплеерной синхронизацией)
@@ -2155,11 +2083,17 @@ function animate() {
                 type: 'player_update',
                 position: { 
                     x: camera.position.x, 
-                    y: 0, 
+                    y: 0, // <--- ЗДЕСЬ ТЕПЕРЬ 0 (ПОЛ), А НЕ camera.position.y
                     z: camera.position.z 
                 },
                 rotation: { pitch, yaw }
             }));
+        }
+
+        // === ДОБАВЛЕНО: Плавное обновление джойстика в каждом кадре ===
+        if (isMobile && touchJoystickActive && gameActive) {
+            // Если джойстик активен, но палец не двигается, он должен мягко держать позицию
+            // Плавность уже реализована в updateJoystick через * 0.3
         }
     }
 
@@ -2452,6 +2386,37 @@ if (isMobile) {
 
 console.log('🎮 Мультиплеерная версия "Аренда"');
 console.log(`📡 Подключение к WebSocket: ${WS_URL}`);
+
+// === ФИКС ПОВОРОТА ЭКРАНА НА iOS ===
+function handleResizeAndOrientation() {
+    // Принудительно обновляем размеры окна
+    if (camera && renderer) {
+        const width = window.innerWidth;
+        const height = window.innerHeight;
+        
+        camera.aspect = width / height;
+        camera.updateProjectionMatrix();
+        
+        renderer.setSize(width, height);
+        if (renderTarget) renderTarget.setSize(width, height);
+        
+        // Рисуем сцену мгновенно, чтобы убрать черные полосы
+        renderer.setRenderTarget(renderTarget);
+        renderer.render(scene, camera);
+        renderer.setRenderTarget(null);
+    }
+
+    // ДОБАВЬ ЭТУ СТРОЧКУ (на случай если меню не успело перерисоваться):
+    window.dispatchEvent(new Event('resize')); 
+}
+
+// Подписываемся на поворот и изменение размера
+window.addEventListener('resize', handleResizeAndOrientation);
+window.addEventListener('orientationchange', () => {
+    // iOS тормозит, даем ему 300мс на переключение ориентации
+    setTimeout(handleResizeAndOrientation, 300);
+});
+
 </script>
 </body>
 </html>
