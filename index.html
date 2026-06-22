@@ -450,7 +450,6 @@ canvas { display: block; }
 // ============================================================
 
 // === ПОДКЛЮЧЕНИЕ К ВАШЕМУ СЕРВЕРУ НА RENDER ===
-// ИСПРАВЛЕНО: используем wss:// и текущий хост
 const WS_URL = `wss://${window.location.hostname}`;
 
 // === СОСТОЯНИЕ МУЛЬТИПЛЕЕРА ===
@@ -458,10 +457,12 @@ let ws = null;
 let roomCode = '';
 let isHost = false;
 let myPlayerId = null;
-let otherPlayers = {}; // { id: { position, rotation, alive, name } }
+let otherPlayers = {};
 let playersInRoom = [];
 let gameStarted = false;
 let isSpectator = false;
+let lastSendTime = 0;
+const SEND_INTERVAL = 0.05; // 20 раз в секунду
 
 // === СОЗДАНИЕ ЛОББИ ===
 function generateRoomCode() {
@@ -505,7 +506,6 @@ function handleWebSocketMessage(event) {
                 isHost = true;
                 showLobbyScreen();
                 updateLobbyUI(data.players);
-                // ВАЖНО: хост тоже должен видеть игроков
                 updateRemotePlayers(data.players);
                 break;
                 
@@ -515,14 +515,12 @@ function handleWebSocketMessage(event) {
                 isHost = false;
                 showLobbyScreen();
                 updateLobbyUI(data.players);
-                // ВАЖНО: подключающийся видит всех
                 updateRemotePlayers(data.players);
                 break;
                 
             case 'player_joined':
                 playersInRoom = data.players;
                 updateLobbyUI(data.players);
-                // ВАЖНО: обновляем модели всех игроков
                 updateRemotePlayers(data.players);
                 break;
                 
@@ -535,9 +533,8 @@ function handleWebSocketMessage(event) {
             case 'game_start':
                 gameStarted = true;
                 document.getElementById('lobby-screen').style.display = 'none';
-                // ВАЖНО: передаем всех игроков в игру
                 updateRemotePlayers(data.players);
-                startGame();
+                startGame(); // ВАЖНО: запускаем у ВСЕХ игроков
                 break;
                 
             case 'player_update':
@@ -555,12 +552,11 @@ function handleWebSocketMessage(event) {
                 break;
 
             case 'request_players':
-    // Сервер присылает актуальный список
-    playersInRoom = data.players;
-    updateLobbyUI(data.players);
-    updateRemotePlayers(data.players);
-    showEventText(`👥 В лобби ${data.players.length} игроков`, 1.5);
-    break; 
+                playersInRoom = data.players;
+                updateLobbyUI(data.players);
+                updateRemotePlayers(data.players);
+                showEventText(`👥 В лобби ${data.players.length} игроков`, 1.5);
+                break; 
                 
             case 'game_over':
                 gameStarted = false;
@@ -591,16 +587,12 @@ function updateLobbyUI(players) {
     playersInRoom = players || [];
     const count = playersInRoom.length;
     
-    // Сначала генерируем строку с именами
     const names = playersInRoom.map(p => p.name || 'Игрок').join(', ');
     
-    // Перезаписываем список игроков, но сохраняем внутри тег с id="player-count"
     document.getElementById('players-list').innerHTML = `Игроки: (${count}) <span id="player-count" style="color: #fff; margin: 0 10px;">${names || '...'}</span>`;
     
-    // Обновляем код комнаты
     document.getElementById('lobby-code-display').textContent = roomCode;
     
-    // Логика кнопки старта
     const startBtn = document.getElementById('btn-start-game');
     if (isHost && count >= 2) {
         startBtn.disabled = false;
@@ -613,6 +605,7 @@ function updateLobbyUI(players) {
         document.getElementById('lobby-status').textContent = `⏳ Ожидание начала игры... (${count} игроков)`;
     }
 }
+
 // Кнопка обновления списка игроков
 document.getElementById('btn-refresh-players').addEventListener('click', () => {
     if (ws && ws.readyState === WebSocket.OPEN) {
@@ -684,7 +677,7 @@ document.getElementById('btn-leave-lobby').addEventListener('click', () => {
     if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ 
             type: 'leave_room',
-            roomCode: roomCode // <--- ДОБАВЛЕНО: передаем код комнаты для корректного выхода
+            roomCode: roomCode
         }));
         ws.close();
     }
@@ -704,7 +697,7 @@ function getPlayerName() {
 }
 
 // ============================================================
-// 2. ГРАФИКА (Three.js & Постпроцессинг) — БЕЗ ИЗМЕНЕНИЙ
+// 2. ГРАФИКА (Three.js & Постпроцессинг)
 // ============================================================
 
 let scene, camera, renderer;
@@ -758,7 +751,7 @@ let joystickKnob = null;
 let touchInteractBtn = null;
 
 // ============================================================
-// 3. АУДИО (без изменений)
+// 3. АУДИО
 // ============================================================
 
 const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -931,11 +924,14 @@ function playClickSound() {
 }
 
 // ============================================================
-// 4. ГРАФИКА (Three.js) — БЕЗ ИЗМЕНЕНИЙ
+// 4. ГРАФИКА (Three.js)
 // ============================================================
 
 function init3D() {
-    if (renderer) { renderer.domElement.remove(); renderer.dispose(); }
+    if (renderer) { 
+        renderer.domElement.remove(); 
+        renderer.dispose(); 
+    }
     
     scene = new THREE.Scene();
     scene.background = new THREE.Color(0x020306);
@@ -1373,7 +1369,6 @@ function createPlayerModel(color = 0x44aaff, name = '') {
         canvas.height = 64;
         const ctx = canvas.getContext('2d');
         ctx.fillStyle = 'rgba(0,0,0,0.5)';
-        // Используем roundRect если доступен
         if (ctx.roundRect) {
             ctx.roundRect(10, 10, 236, 44, 10);
         } else {
@@ -1418,7 +1413,7 @@ function createGhostModel(color = 0x44aaff) {
 }
 
 // ============================================================
-// 6. УПРАВЛЕНИЕ (без изменений)
+// 6. УПРАВЛЕНИЕ
 // ============================================================
 
 function setupControls() {
@@ -1473,7 +1468,6 @@ function setupControls() {
     if (isMobile) setupMobileControls();
 }
 
-// === МОБИЛЬНЫЙ FULLSCREEN И ОРИЕНТАЦИЯ ===
 // === МОБИЛЬНЫЙ FULLSCREEN И ОРИЕНТАЦИЯ ===
 function handleMobileFullscreen() {
     if (isMobile) {
@@ -1536,7 +1530,6 @@ function handleMobileFullscreen() {
         // Исправляем проблему с прокруткой
         document.addEventListener('touchmove', (e) => {
             if (e.target.closest('#touch-joystick-area') || 
-                e.target.closest('#touch-look-area') ||
                 e.target.closest('#touch-interact')) {
                 return;
             }
@@ -1551,23 +1544,20 @@ document.addEventListener('DOMContentLoaded', handleMobileFullscreen);
 function setupMobileControls() {
     const controls = document.getElementById('mobile-controls');
     controls.classList.add('active');
+    
     const joystickArea = document.getElementById('touch-joystick-area');
-    const lookArea = document.getElementById('touch-look-area');
     touchInteractBtn = document.getElementById('touch-interact');
     joystickKnob = document.getElementById('joystick-knob');
     const lockHint = document.getElementById('mobile-lock-hint');
     
-    document.addEventListener('touchstart', (e) => {
-        if (gameActive && document.pointerLockElement !== document.body) {
-            document.body.requestPointerLock();
-            lockHint.style.display = 'none';
-            if (audioCtx.state === 'suspended') audioCtx.resume();
-        }
-    }, { passive: true });
+    // Скрываем зону для поворота (она больше не нужна)
+    const lookArea = document.getElementById('touch-look-area');
+    if (lookArea) lookArea.style.display = 'none';
     
+    // === ДЖОЙСТИК ДВИЖЕНИЯ (левая сторона) ===
     joystickArea.addEventListener('touchstart', (e) => {
         e.preventDefault();
-        if (!gameActive) return;
+        if (!gameActive || isSpectator) return;
         const touch = e.touches[0];
         const rect = joystickArea.getBoundingClientRect();
         touchJoystickStartX = rect.left + rect.width / 2;
@@ -1578,7 +1568,7 @@ function setupMobileControls() {
     
     joystickArea.addEventListener('touchmove', (e) => {
         e.preventDefault();
-        if (!touchJoystickActive || !gameActive) return;
+        if (!touchJoystickActive || !gameActive || isSpectator) return;
         const touch = e.touches[0];
         updateJoystick(touch.clientX, touch.clientY);
     }, { passive: false });
@@ -1591,43 +1581,81 @@ function setupMobileControls() {
         moveState.w = false; moveState.s = false; moveState.a = false; moveState.d = false;
     }, { passive: false });
     
-    // Для обзора на мобильных
-    let touchLookActive = false;
-    let touchLookStartX = 0, touchLookStartY = 0;
+    // === СВОБОДНЫЙ ПОВОРОТ КАМЕРЫ (правая половина экрана) ===
+    let lookTouchId = null;
+    let lookStartX = 0, lookStartY = 0;
     
-    lookArea.addEventListener('touchstart', (e) => {
-        e.preventDefault();
-        if (!gameActive) return;
-        const touch = e.touches[0];
-        touchLookStartX = touch.clientX; touchLookStartY = touch.clientY;
-        touchLookActive = true;
+    document.addEventListener('touchstart', (e) => {
+        if (!gameActive || isSpectator) return;
+        
+        // Ищем касание в правой половине экрана
+        for (let i = 0; i < e.changedTouches.length; i++) {
+            const touch = e.changedTouches[i];
+            const screenMidX = window.innerWidth / 2;
+            
+            // Если касание справа и не на джойстике и не на кнопке взаимодействия
+            if (touch.clientX > screenMidX && 
+                !touch.target.closest('#touch-joystick-area') &&
+                !touch.target.closest('#touch-interact')) {
+                
+                lookTouchId = touch.identifier;
+                lookStartX = touch.clientX;
+                lookStartY = touch.clientY;
+                e.preventDefault();
+                return;
+            }
+        }
     }, { passive: false });
     
-    lookArea.addEventListener('touchmove', (e) => {
-        e.preventDefault();
-        if (!touchLookActive || !gameActive) return;
-        const touch = e.touches[0];
-        const dx = touch.clientX - touchLookStartX;
-        const dy = touch.clientY - touchLookStartY;
-        const sensitivity = 0.008;
-        yaw += dx * sensitivity;
-        pitch -= dy * sensitivity;
-        pitch = Math.max(-Math.PI/2 + 0.1, Math.min(Math.PI/2 - 0.1, pitch));
-        camera.rotation.set(pitch, yaw, 0, 'YXZ');
-        touchLookStartX = touch.clientX;
-        touchLookStartY = touch.clientY;
+    document.addEventListener('touchmove', (e) => {
+        if (!gameActive || isSpectator || lookTouchId === null) return;
+        
+        for (let i = 0; i < e.changedTouches.length; i++) {
+            const touch = e.changedTouches[i];
+            if (touch.identifier === lookTouchId) {
+                const dx = touch.clientX - lookStartX;
+                const dy = touch.clientY - lookStartY;
+                
+                const sensitivity = 0.005; // Чувствительность поворота
+                yaw -= dx * sensitivity;
+                pitch += dy * sensitivity;
+                
+                // Ограничиваем угол обзора
+                pitch = Math.max(-Math.PI/2 + 0.1, Math.min(Math.PI/2 - 0.1, pitch));
+                camera.rotation.set(pitch, yaw, 0, 'YXZ');
+                
+                lookStartX = touch.clientX;
+                lookStartY = touch.clientY;
+                e.preventDefault();
+                return;
+            }
+        }
     }, { passive: false });
     
-    lookArea.addEventListener('touchend', (e) => { 
-        e.preventDefault();
-        touchLookActive = false; 
-    }, { passive: false });
+    document.addEventListener('touchend', (e) => {
+        for (let i = 0; i < e.changedTouches.length; i++) {
+            if (e.changedTouches[i].identifier === lookTouchId) {
+                lookTouchId = null;
+                return;
+            }
+        }
+    });
     
+    // === КНОПКА ВЗАИМОДЕЙСТВИЯ ===
     touchInteractBtn.addEventListener('touchstart', (e) => {
         e.preventDefault();
-        if (!gameActive) return;
+        if (!gameActive || isSpectator) return;
         handleInteraction();
     }, { passive: false });
+    
+    // Запрос блокировки экрана при старте
+    document.addEventListener('touchstart', (e) => {
+        if (gameActive && document.pointerLockElement !== document.body && !isSpectator) {
+            document.body.requestPointerLock();
+            lockHint.style.display = 'none';
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+        }
+    }, { passive: true });
 }
 
 function updateJoystick(clientX, clientY) {
@@ -1946,15 +1974,6 @@ function updateHorror(delta) {
         warning.classList.add('show');
         warning.textContent = `⚠️ СВЕТ ВЫКЛЮЧЕН! ${Math.ceil(20 - horrorState.powerOutageTimer)}с`;
     }
-    
-    // Отправляем позицию на сервер
-    if (ws && ws.readyState === WebSocket.OPEN && gameActive && !isSpectator) {
-        ws.send(JSON.stringify({
-            type: 'player_update',
-            position: { x: camera.position.x, y: camera.position.y, z: camera.position.z },
-            rotation: { pitch, yaw }
-        }));
-    }
 }
 
 function triggerPowerOutage() {
@@ -1984,6 +2003,11 @@ function triggerPowerOutage() {
 
 function updateRemotePlayers(players) {
     console.log('🔄 Обновление игроков:', players);
+    
+    if (!scene) {
+        console.warn('⚠️ Сцена еще не инициализирована');
+        return;
+    }
     
     // Удаляем старые модели
     for (const id in playerMeshes) {
@@ -2039,11 +2063,11 @@ function updateRemotePlayers(players) {
 // 10. ГЛАВНЫЙ ЦИКЛ
 // ============================================================
 
-const clock = new THREE.Clock();
+const gameClock = new THREE.Clock();
 
 function animate() {
     requestAnimationFrame(animate);
-    const delta = clock.getDelta();
+    const delta = gameClock.getDelta();
 
     if (gameActive && !isPaused && !isSpectator) {
         gameTimeSeconds += delta;
@@ -2108,21 +2132,42 @@ function animate() {
                 touchInteract.classList.remove('active');
             }
         }
+        
+        // Отправляем позицию на сервер с высокой частотой
+        const now = performance.now() / 1000;
+        if (ws && ws.readyState === WebSocket.OPEN && now - lastSendTime > SEND_INTERVAL) {
+            lastSendTime = now;
+            ws.send(JSON.stringify({
+                type: 'player_update',
+                position: { 
+                    x: camera.position.x, 
+                    y: camera.position.y, 
+                    z: camera.position.z 
+                },
+                rotation: { pitch, yaw }
+            }));
+        }
     }
 
-    renderer.setRenderTarget(renderTarget);
-    renderer.render(scene, camera);
-    renderer.setRenderTarget(null);
-    
-    postMaterial.uniforms.time.value += delta;
-    renderer.render(postScene, postCamera);
+    if (scene && camera && renderer) {
+        renderer.setRenderTarget(renderTarget);
+        renderer.render(scene, camera);
+        renderer.setRenderTarget(null);
+        
+        if (postMaterial) {
+            postMaterial.uniforms.time.value += delta;
+            renderer.render(postScene, postCamera);
+        }
+    }
 }
 
 function onWindowResize() {
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    renderTarget.setSize(window.innerWidth, window.innerHeight);
+    if (camera && renderer) {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        if (renderTarget) renderTarget.setSize(window.innerWidth, window.innerHeight);
+    }
 }
 
 // ============================================================
@@ -2256,11 +2301,22 @@ async function startGame() {
     initAudio();
     init3D();
     gameActive = true;
-    clock.start();
+    gameClock.start();
     isSpectator = false;
     
-    // ВАЖНО: синхронизируем игроков при старте
+    // Отправляем свою позицию сразу после старта
     if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+            type: 'player_update',
+            position: { 
+                x: camera.position.x, 
+                y: camera.position.y, 
+                z: camera.position.z 
+            },
+            rotation: { pitch: 0, yaw: 0 }
+        }));
+        
+        // Запрашиваем позиции других игроков
         ws.send(JSON.stringify({
             type: 'request_players'
         }));
@@ -2326,7 +2382,7 @@ function resetGame() {
     
     // Удаляем модели других игроков
     for (const id in playerMeshes) {
-        scene.remove(playerMeshes[id]);
+        if (scene) scene.remove(playerMeshes[id]);
         delete playerMeshes[id];
     }
     
@@ -2375,6 +2431,9 @@ document.getElementById('btn-restart-win').addEventListener('click', resetGame);
 if (isMobile) {
     document.getElementById('mobile-controls').classList.add('active');
     document.getElementById('interaction-hint').style.display = 'none';
+    // Скрываем look-area на мобильных
+    const lookArea = document.getElementById('touch-look-area');
+    if (lookArea) lookArea.style.display = 'none';
 }
 
 console.log('🎮 Мультиплеерная версия "Аренда"');
