@@ -1813,29 +1813,33 @@ function handleInteraction() {
     if (target.userData.type === 'note') {
         document.getElementById('photo-ui').style.display = 'block';
     } else if (target.userData.type === 'wardrobe') {
-        const w = target.userData;
-        w.doorOpen = !w.doorOpen;
-        w.doors[0].rotation.y = w.doorOpen ? -Math.PI/2 : 0;
-        w.doors[1].rotation.y = w.doorOpen ? Math.PI/2 : 0;
+        const w = wardrobeMesh.userData; // Всегда берём данные с основного меша шкафа
         
-        if (w.doorOpen) {
-            showEventText('🚪 Шкаф открыт. Нажмите ЛКМ чтобы зайти внутрь', 2);
-        } else {
-            // Если игрок был в шкафу — выталкиваем наружу
-            if (horrorState.isInCloset) {
-                camera.position.set(8, 5, -6.5);
-                horrorState.isInCloset = false;
+        // Если игрок ВНУТРИ шкафа — закрываем/открываем дверцы изнутри
+        if (horrorState.isInCloset) {
+            w.doorOpen = !w.doorOpen;
+            w.doors[0].rotation.y = w.doorOpen ? -Math.PI/2 : 0;
+            w.doors[1].rotation.y = w.doorOpen ? Math.PI/2 : 0;
+            
+            if (w.doorOpen) {
+                showEventText('🚪 Дверцы открыты. Выходите наружу', 2);
+            } else {
+                showEventText('🚪 Дверцы закрыты. Вы внутри', 1.5);
             }
-            showEventText('🚪 Шкаф закрыт', 1.5);
-        }
-        playClickSound();
-    } else if (target.userData.type === 'wardrobe_enter') {
-        // Зайти в шкаф (только когда дверцы открыты)
-        const w = wardrobeMesh.userData;
-        if (w.doorOpen) {
-            camera.position.set(8, 3.5, -8);
-            horrorState.isInCloset = true;
-            showEventText('🚪 Вы в шкафу. Нажмите на дверцу чтобы выйти', 2);
+            playClickSound();
+        } 
+        // Если игрок СНАРУЖИ — просто открываем/закрываем дверцы
+        else {
+            w.doorOpen = !w.doorOpen;
+            w.doors[0].rotation.y = w.doorOpen ? -Math.PI/2 : 0;
+            w.doors[1].rotation.y = w.doorOpen ? Math.PI/2 : 0;
+            
+            if (w.doorOpen) {
+                showEventText('🚪 Шкаф открыт. Зайдите внутрь (W/вперёд)', 2);
+            } else {
+                showEventText('🚪 Шкаф закрыт', 1.5);
+            }
+            playClickSound();
         }
     } else if (target.userData.type === 'door') {
         if (horrorState.phase >= 2) triggerDeath('door');
@@ -2232,6 +2236,17 @@ function animate() {
         const testZ = camera.position.clone();
         testZ.z += moveVec.z;
         if (!checkCollision(testZ)) camera.position.z += moveVec.z;
+                // Авто-заход в шкаф: если дверцы открыты и игрок подошёл вплотную
+        const w = wardrobeMesh.userData;
+        if (w.doorOpen && !horrorState.isInCloset) {
+            const wardrobePos = new THREE.Vector3(8, 3.5, -8);
+            const distToWardrobe = camera.position.distanceTo(wardrobePos);
+            if (distToWardrobe < 2.0) {
+                camera.position.set(8, 3.5, -8);
+                horrorState.isInCloset = true;
+                showEventText('🚪 Вы в шкафу. Кликните на дверцу чтобы закрыть', 2);
+            }
+        }
 
         raycaster.setFromCamera(centerVector, camera);
         const intersects = raycaster.intersectObjects([wardrobeMesh, noteMesh, doorMesh, bedMesh, switchMesh], true);
