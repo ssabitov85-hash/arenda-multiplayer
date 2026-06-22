@@ -359,7 +359,7 @@ canvas {
         <div id="death-flash"></div>
     </div>
 
-    <div id="photo-ui">
+    <div id="photo-ui" onclick="this.style.display='none'" ontouchstart="this.style.display='none'">
         <img id="photo-img" src="zapiska.png" alt="Фото">
     </div>
 
@@ -374,7 +374,7 @@ canvas {
             <span class="look-label">Обзор</span>
         </div>
         <div id="touch-interact">👆</div>
-        <div id="mobile-lock-hint">Нажмите на экран для управления</div>
+        <div id="touch-crawl" style="position:absolute; bottom:50%; left:50%; transform:translate(-50%, 150%); width:55px; height:55px; border-radius:50%; background:rgba(0,100,0,0.3); border:2px solid rgba(0,255,0,0.4); color:white; font-size:1rem; pointer-events:auto; touch-action:none; display:none; justify-content:center; align-items:center; z-index:13;">⬆️</div>
     </div>
 
     <!-- ГЛАВНОЕ МЕНЮ -->
@@ -1207,12 +1207,39 @@ function buildRoom() {
     tvLight = new THREE.PointLight(0xffffff, 0, 15);
     tvLight.position.set(0, 3.5, -7); scene.add(tvLight);
 
-    // Шкаф
-    wardrobeMesh = new THREE.Mesh(new THREE.BoxGeometry(3, 8, 3), woodMat);
-    wardrobeMesh.position.set(8, 4, -8);
-    wardrobeMesh.castShadow = true; wardrobeMesh.receiveShadow = true;
-    wardrobeMesh.userData = { type: 'wardrobe' };
-    scene.add(wardrobeMesh);
+// Шкаф с дверцами
+const wardrobeGroup = new THREE.Group();
+wardrobeGroup.position.set(8, 0, -8);
+scene.add(wardrobeGroup);
+
+const wardrobeBody = new THREE.Mesh(new THREE.BoxGeometry(3, 8, 3), woodMat);
+wardrobeBody.position.y = 4;
+wardrobeBody.castShadow = true; wardrobeBody.receiveShadow = true;
+wardrobeGroup.add(wardrobeBody);
+
+// Дырки для света
+const holeMat = new THREE.MeshStandardMaterial({ color: 0x000000, roughness: 1 });
+for (let r = 0; r < 3; r++) {
+    for (let c = 0; c < 4; c++) {
+        const hole = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 1.6, 8), holeMat);
+        hole.position.set(-0.6 + c * 0.4, 2 + r * 2.5, 1.51);
+        wardrobeGroup.add(hole);
+    }
+}
+
+// Дверцы
+const doorL = new THREE.Mesh(new THREE.BoxGeometry(0.1, 7.5, 1.45), woodMat);
+doorL.position.set(-0.75, 4, 1.5);
+doorL.userData = { isDoor: true, side: 'left' };
+wardrobeGroup.add(doorL);
+
+const doorR = new THREE.Mesh(new THREE.BoxGeometry(0.1, 7.5, 1.45), woodMat);
+doorR.position.set(0.75, 4, 1.5);
+doorR.userData = { isDoor: true, side: 'right' };
+wardrobeGroup.add(doorR);
+
+wardrobeMesh = wardrobeGroup;
+wardrobeMesh.userData = { type: 'wardrobe', doors: [doorL, doorR], doorOpen: false };
 
     // Дверь
     const doorMat = new THREE.MeshStandardMaterial({ color: 0x4a3a2a, roughness: 0.85 });
@@ -1442,6 +1469,15 @@ function setupControls() {
             }
         });
         document.addEventListener('keydown', (e) => {
+            // Выход из-под кровати на SPACE
+            if (e.code === 'Space' && horrorState.isUnderBed && gameActive && !isSpectator) {
+                e.preventDefault();
+                camera.position.set(bedMesh.position.x, 5, bedMesh.position.z + 1);
+                horrorState.isUnderBed = false;
+                showEventText('✅ Вы вылезли', 1);
+                return;
+            }
+            
             const key = e.key.toLowerCase();
             if (key === 'w' || key === 'ц') moveState.w = true;
             if (key === 'a' || key === 'ф') moveState.a = true;
@@ -1643,7 +1679,18 @@ function setupMobileControls() {
     // Теперь слушаем события на ВСЕМ документе, но проверяем, что касание было справа
     let lookTouchId = null;
     let lookStartX = 0, lookStartY = 0;
-    
+        // === КНОПКА ВЫЛЕЗТИ ИЗ-ПОД КРОВАТИ ===
+    const crawlBtn = document.getElementById('touch-crawl');
+    crawlBtn.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (horrorState.isUnderBed && gameActive && !isSpectator) {
+            camera.position.set(bedMesh.position.x, 5, bedMesh.position.z + 1);
+            horrorState.isUnderBed = false;
+            crawlBtn.style.display = 'none';
+            showEventText('✅ Вы вылезли', 1);
+        }
+    });
     document.addEventListener('touchstart', (e) => {
         if (!gameActive || isSpectator) return;
         
@@ -1722,14 +1769,26 @@ function handleInteraction() {
     if (hoveredObject && gameActive && !isPaused && !isSpectator) {
         if (hoveredObject.userData.type === 'note') {
             document.getElementById('photo-ui').style.display = 'block';
-        } else if (hoveredObject.userData.type === 'door') {
-            if (horrorState.phase >= 2) {
-                triggerDeath('door');
+        } else if (hoveredObject.userData.type === 'wardrobe') {
+            const w = wardrobeMesh.userData;
+            w.doorOpen = !w.doorOpen;
+            w.doors[0].rotation.y = w.doorOpen ? -Math.PI/2 : 0;
+            w.doors[1].rotation.y = w.doorOpen ? Math.PI/2 : 0;
+            if (w.doorOpen) {
+                camera.position.set(wardrobeMesh.position.x, 2.5, wardrobeMesh.position.z);
+                horrorState.isInCloset = true;
+                showEventText('🚪 Вы в шкафу. Нажмите ещё раз чтобы выйти', 2);
             } else {
-                showEventText('🚪 Дверь заперта...', 2);
+                camera.position.set(wardrobeMesh.position.x + 1.5, 5, wardrobeMesh.position.z);
+                horrorState.isInCloset = false;
             }
+        } else if (hoveredObject.userData.type === 'door') {
+            if (horrorState.phase >= 2) triggerDeath('door');
+            else showEventText('🚪 Дверь заперта...', 2);
         } else if (hoveredObject.userData.type === 'bed') {
-            showEventText('🛏️ На кровати старая фотография...', 2);
+            camera.position.set(bedMesh.position.x, 0.3, bedMesh.position.z);
+            horrorState.isUnderBed = true;
+            showEventText('🛏️ Вы под кроватью. Нажмите SPACE (или кнопку) чтобы вылезти', 2);
         } else if (hoveredObject.userData.type === 'switch') {
             if (horrorState.powerOutage) {
                 isCeilingLightOn = true;
@@ -2089,6 +2148,11 @@ function animate() {
     const delta = gameClock.getDelta();
 
     if (gameActive && !isPaused && !isSpectator) {
+                // Показ/скрытие кнопки вылезти
+        if (isMobile) {
+            const crawlBtn = document.getElementById('touch-crawl');
+            if (crawlBtn) crawlBtn.style.display = horrorState.isUnderBed ? 'flex' : 'none';
+        }
         gameTimeSeconds += delta;
         updateClockTexture(formatTime(gameTimeSeconds));
         updateHorror(delta);
