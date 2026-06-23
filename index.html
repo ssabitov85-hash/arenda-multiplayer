@@ -724,12 +724,6 @@ let doorMesh, bedMesh;
 let ceilingLightMesh, ceilingBulbMat, switchMesh, ceilingPointLight, switchRocker;
 let isCeilingLightOn = false;
 
-// Дверь в коридор
-let mainDoorOpen = false;
-let mainDoorAngle = 0;
-let mainDoorTargetAngle = 0;
-let mainDoorGroup = null; // группа для вращения двери
-
 let gameActive = false;
 let isPaused = false;
 let gameTimeSeconds = 0;
@@ -1274,50 +1268,27 @@ wardrobeGroup.add(wardrobeDetector);
 
 wardrobeMesh = wardrobeDetector;
 
-    // =============================================
-    // ДВЕРЬ В КОРИДОР (с анимацией открытия)
-    // =============================================
+    // Дверь
     const doorMat = new THREE.MeshStandardMaterial({ color: 0x4a3a2a, roughness: 0.85 });
     const doorFrameMat = new THREE.MeshStandardMaterial({ color: 0x3a2a1a, roughness: 0.9 });
     const doorWidth = 3.0, doorHeight = 7.0, doorDepth = 0.3;
-
-    // Рама двери
-    const frame = new THREE.Mesh(new THREE.BoxGeometry(0.25, doorHeight + 0.5, doorWidth + 0.5), doorFrameMat);
+    const frame = new THREE.Mesh(new THREE.BoxGeometry(0.25, doorHeight + 0.2, doorWidth + 0.2), doorFrameMat);
     frame.position.set(9.9, doorHeight/2, 0); scene.add(frame);
-
-    // Группа-шарнир: pivot в точке петли (левый край двери = z = -1.5)
-    mainDoorGroup = new THREE.Group();
-    mainDoorGroup.position.set(9.75, 0, -1.5); // петля слева
-    scene.add(mainDoorGroup);
-
-    // Полотно двери относительно шарнира (смещено вправо на половину ширины)
-    const doorPanel = new THREE.Mesh(new THREE.BoxGeometry(doorDepth, doorHeight, doorWidth), doorMat);
-    doorPanel.position.set(0, doorHeight/2, doorWidth/2); // центр полотна
-    mainDoorGroup.add(doorPanel);
-
-    // Невидимый детектор на всё полотно
-    doorMesh = new THREE.Mesh(new THREE.BoxGeometry(doorDepth + 0.5, doorHeight, doorWidth + 0.5),
-        new THREE.MeshBasicMaterial({ visible: false }));
-    doorMesh.position.set(0, doorHeight/2, doorWidth/2);
+    doorMesh = new THREE.Mesh(new THREE.BoxGeometry(doorDepth, doorHeight, doorWidth), doorMat);
+    doorMesh.position.set(9.85, doorHeight/2, 0);
     doorMesh.userData = { type: 'door' };
-    mainDoorGroup.add(doorMesh);
-
-    // Ручка
+    scene.add(doorMesh);
+    const doorHandleGroup = new THREE.Group();
+    doorHandleGroup.position.set(9.68, doorHeight / 2, 0.8); scene.add(doorHandleGroup);
     const realHandleMetalMat = new THREE.MeshStandardMaterial({ color: 0xaaaaaa, metalness: 0.85, roughness: 0.25 });
-    const handleGrp = new THREE.Group();
-    handleGrp.position.set(-0.2, doorHeight/2, doorWidth - 0.5);
     const rosette = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.02, 32), realHandleMetalMat);
-    rosette.rotation.z = Math.PI / 2; handleGrp.add(rosette);
+    rosette.rotation.z = Math.PI / 2; doorHandleGroup.add(rosette);
+    const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.12, 16), realHandleMetalMat);
+    stem.rotation.z = Math.PI / 2; stem.position.x = -0.05; doorHandleGroup.add(stem);
     const lever = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.03, 0.45, 16), realHandleMetalMat);
-    lever.rotation.x = Math.PI / 2; lever.position.set(0, 0, 0.22); handleGrp.add(lever);
+    lever.rotation.x = Math.PI / 2; lever.position.set(-0.1, 0, 0.2); doorHandleGroup.add(lever);
     const tip = new THREE.Mesh(new THREE.SphereGeometry(0.033, 16, 16), realHandleMetalMat);
-    tip.position.set(0, 0, 0.45); handleGrp.add(tip);
-    mainDoorGroup.add(handleGrp);
-
-    // =============================================
-    // КОРИДОР (хол)
-    // =============================================
-    buildCorridor();
+    tip.position.set(-0.1, 0, 0.425); doorHandleGroup.add(tip);
 
     // Кровать
     const bedX = -6.0, bedZ = 5.5;
@@ -1389,196 +1360,6 @@ wardrobeMesh = wardrobeDetector;
     switchMesh.position.set(0, 0, 0.05); switchMesh.userData = { type: 'switch' };
     switchGroup.add(switchMesh);
     switchRocker.rotation.x = 0.2;
-}
-
-// =============================================
-// КОРИДОР И НОВЫЕ КОМНАТЫ
-// =============================================
-function buildCorridor() {
-    const wallMat  = new THREE.MeshStandardMaterial({ color: 0x3d3428, roughness: 0.9 });
-    const wallMatF = new THREE.MeshStandardMaterial({ color: 0x3d3428, roughness: 0.9, side: THREE.FrontSide });
-    const floorMat = new THREE.MeshStandardMaterial({ color: 0x1e180f, roughness: 1.0 });
-    const ceilMat  = new THREE.MeshStandardMaterial({ color: 0x2a2318, roughness: 1.0 });
-    const doorMat2 = new THREE.MeshStandardMaterial({ color: 0x4a3a2a, roughness: 0.85 });
-    const frameMat = new THREE.MeshStandardMaterial({ color: 0x2a1a0a, roughness: 0.9 });
-    const woodMat2 = new THREE.MeshStandardMaterial({ color: 0x2a1a10, roughness: 0.8 });
-    const glassMat = new THREE.MeshBasicMaterial({ color: 0x0a0d18, transparent: true, opacity: 0.18, side: THREE.DoubleSide });
-
-    // Слабый свет в коридоре
-    const corrLight = new THREE.PointLight(0xc8b89a, 0.3, 40);
-    corrLight.position.set(20, 8, 0);
-    scene.add(corrLight);
-
-    // ---- КОРИДОР ----
-    // Коридор идёт вдоль оси X: от x=10 до x=40, ширина по Z: -2.5..+2.5, высота 10
-    const CORR_X0 = 10, CORR_X1 = 40;
-    const CORR_W = 5; // ширина ±2.5
-    const CORR_H = 10;
-
-    // Пол коридора
-    const corrFloor = new THREE.Mesh(new THREE.PlaneGeometry(CORR_X1 - CORR_X0, CORR_W), floorMat);
-    corrFloor.rotation.x = -Math.PI/2;
-    corrFloor.position.set((CORR_X0+CORR_X1)/2, 0, 0);
-    scene.add(corrFloor);
-
-    // Потолок коридора
-    const corrCeil = new THREE.Mesh(new THREE.PlaneGeometry(CORR_X1 - CORR_X0, CORR_W), ceilMat);
-    corrCeil.rotation.x = Math.PI/2;
-    corrCeil.position.set((CORR_X0+CORR_X1)/2, CORR_H, 0);
-    scene.add(corrCeil);
-
-    // Левая стена коридора (z = -2.5), с дырой для спальни (x ≈ 14..18)
-    function wallSegment(x0, x1, zPos, rotY, h) {
-        const w = x1 - x0;
-        const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), wallMatF);
-        m.position.set((x0+x1)/2, h/2, zPos);
-        m.rotation.y = rotY;
-        scene.add(m);
-    }
-    // Правая стена (z = +2.5)
-    wallSegment(CORR_X0, CORR_X1, 2.5, Math.PI, CORR_H);
-    // Левая стена до двери спальни
-    wallSegment(CORR_X0, 14, -2.5, 0, CORR_H);
-    // Левая стена над дверью спальни
-    const wallAboveBed = new THREE.Mesh(new THREE.PlaneGeometry(4, 3), wallMatF);
-    wallAboveBed.position.set(16, 8.5, -2.5); wallAboveBed.rotation.y = 0; scene.add(wallAboveBed);
-    // Левая стена после двери спальни
-    wallSegment(18, CORR_X1, -2.5, 0, CORR_H);
-
-    // Торцевая стена коридора (x = CORR_X1 = 40)
-    // Дырка для окна в центре
-    const wallEndTop = new THREE.Mesh(new THREE.PlaneGeometry(CORR_W, 3), wallMatF);
-    wallEndTop.position.set(CORR_X1, 8.5, 0); wallEndTop.rotation.y = -Math.PI/2; scene.add(wallEndTop);
-    const wallEndBotL = new THREE.Mesh(new THREE.PlaneGeometry(1, 4), wallMatF);
-    wallEndBotL.position.set(CORR_X1, 2, -2); wallEndBotL.rotation.y = -Math.PI/2; scene.add(wallEndBotL);
-    const wallEndBotR = new THREE.Mesh(new THREE.PlaneGeometry(1, 4), wallMatF);
-    wallEndBotR.position.set(CORR_X1, 2, 2); wallEndBotR.rotation.y = -Math.PI/2; scene.add(wallEndBotR);
-
-    // Окно в торце коридора
-    const corrWindow = new THREE.Mesh(new THREE.PlaneGeometry(3, 4), glassMat);
-    corrWindow.position.set(CORR_X1, 4, 0); corrWindow.rotation.y = -Math.PI/2; scene.add(corrWindow);
-    // Рама окна
-    [[CORR_X1, 6.1, 0], [CORR_X1, 1.9, 0]].forEach(([x,y,z]) => {
-        const b = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.2, 3.4), woodMat2);
-        b.position.set(x,y,z); scene.add(b);
-    });
-    [[CORR_X1, 4, -1.6], [CORR_X1, 4, 1.6]].forEach(([x,y,z]) => {
-        const b = new THREE.Mesh(new THREE.BoxGeometry(0.2, 4.0, 0.2), woodMat2);
-        b.position.set(x,y,z); scene.add(b);
-    });
-
-    // ---- ДВЕРЬ НА КУХНЮ (правая стена коридора, z=+2.5, x≈25) ----
-    const kitchenDoorFrame = new THREE.Mesh(new THREE.BoxGeometry(0.3, 7.4, 3.4), frameMat);
-    kitchenDoorFrame.position.set(25, 3.7, 2.5); scene.add(kitchenDoorFrame);
-    const kitchenDoorPanel = new THREE.Mesh(new THREE.BoxGeometry(0.15, 7, 3), doorMat2);
-    kitchenDoorPanel.position.set(25, 3.5, 2.5);
-    kitchenDoorPanel.userData = { type: 'door_locked' };
-    scene.add(kitchenDoorPanel);
-    // Ручка кухонной двери
-    const kHandleMat = new THREE.MeshStandardMaterial({ color: 0xbbbbbb, metalness: 0.8, roughness: 0.3 });
-    const kHandle = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.3, 8), kHandleMat);
-    kHandle.rotation.x = Math.PI/2; kHandle.position.set(24.85, 3.5, 1.2); scene.add(kHandle);
-
-    // ---- ДВЕРЬ НА УЛИЦУ (левая стена коридора, z=-2.5, x≈35) — нерабочая ----
-    const streetDoorFrame = new THREE.Mesh(new THREE.BoxGeometry(0.3, 7.4, 3.4), frameMat);
-    streetDoorFrame.position.set(35, 3.7, -2.5); scene.add(streetDoorFrame);
-    const streetDoorPanel = new THREE.Mesh(new THREE.BoxGeometry(0.15, 7, 3), doorMat2);
-    streetDoorPanel.position.set(35, 3.5, -2.5);
-    streetDoorPanel.userData = { type: 'door_locked' };
-    scene.add(streetDoorPanel);
-    const sHandleMat = new THREE.MeshStandardMaterial({ color: 0xbbbbbb, metalness: 0.8, roughness: 0.3 });
-    const sHandle = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.3, 8), sHandleMat);
-    sHandle.rotation.x = Math.PI/2; sHandle.position.set(34.85, 3.5, -1.2); scene.add(sHandle);
-    // Табличка "Выход" над дверью
-    const exitSign = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.5, 1.5),
-        new THREE.MeshStandardMaterial({ color: 0x003300 }));
-    exitSign.position.set(34.9, 7.8, -2.5); scene.add(exitSign);
-
-    // ---- ДВЕРЬ В ВАННУЮ (правая стена коридора, x≈38) ----
-    const bathDoorFrame = new THREE.Mesh(new THREE.BoxGeometry(0.3, 7.4, 3.4), frameMat);
-    bathDoorFrame.position.set(38, 3.7, 2.5); scene.add(bathDoorFrame);
-    const bathDoorPanel = new THREE.Mesh(new THREE.BoxGeometry(0.15, 7, 3), doorMat2);
-    bathDoorPanel.position.set(38, 3.5, 2.5);
-    bathDoorPanel.userData = { type: 'door_locked' };
-    scene.add(bathDoorPanel);
-    const bHandleMat = new THREE.MeshStandardMaterial({ color: 0xbbbbbb, metalness: 0.8, roughness: 0.3 });
-    const bHandle = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.3, 8), bHandleMat);
-    bHandle.rotation.x = Math.PI/2; bHandle.position.set(37.85, 3.5, 1.2); scene.add(bHandle);
-
-    // ---- ДВЕРЬ В СПАЛЬНЮ (левая стена коридора, z=-2.5, x=14..18) ----
-    const bedDoorFrame = new THREE.Mesh(new THREE.BoxGeometry(0.3, 7.4, 4.4), frameMat);
-    bedDoorFrame.position.set(16, 3.7, -2.5); scene.add(bedDoorFrame);
-    const bedDoorPanel = new THREE.Mesh(new THREE.BoxGeometry(0.15, 7, 4), doorMat2);
-    bedDoorPanel.position.set(16, 3.5, -2.5);
-    bedDoorPanel.userData = { type: 'door_locked' };
-    scene.add(bedDoorPanel);
-    const bdHandleMat = new THREE.MeshStandardMaterial({ color: 0xbbbbbb, metalness: 0.8, roughness: 0.3 });
-    const bdHandle = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.3, 8), bdHandleMat);
-    bdHandle.rotation.x = Math.PI/2; bdHandle.position.set(15.85, 3.5, -1.0); scene.add(bdHandle);
-
-    // ---- ВАННАЯ КОМНАТА (x: 40..60, z: 2.5..18) ----
-    buildRoom_Bath(40, 2.5, 20, 15.5, CORR_H, floorMat, ceilMat, wallMatF);
-
-    // ---- КУХНЯ (x: 10..30, z: 2.5..22) ----
-    buildRoom_Kitchen(10, 2.5, 30, 20, CORR_H, floorMat, ceilMat, wallMatF);
-
-    // ---- СПАЛЬНЯ (x: 10..30, z: -2.5 .. -22) ----
-    buildRoom_Bedroom(10, -2.5, 30, -20, CORR_H, floorMat, ceilMat, wallMatF);
-}
-
-function buildRoom_Bath(x0, z0, x1, z1, h, floorMat, ceilMat, wallMat) {
-    const w = x1 - x0, d = z1 - z0;
-    const cx = (x0+x1)/2, cz = (z0+z1)/2;
-    const roomFloor = new THREE.Mesh(new THREE.PlaneGeometry(w, d), floorMat);
-    roomFloor.rotation.x = -Math.PI/2; roomFloor.position.set(cx, 0, cz); scene.add(roomFloor);
-    const roomCeil = new THREE.Mesh(new THREE.PlaneGeometry(w, d), ceilMat);
-    roomCeil.rotation.x = Math.PI/2; roomCeil.position.set(cx, h, cz); scene.add(roomCeil);
-    // Стены
-    [[cx, h/2, z0, 0], [cx, h/2, z1, Math.PI],
-     [x0, h/2, cz, Math.PI/2], [x1, h/2, cz, -Math.PI/2]].forEach(([x,y,z,ry]) => {
-        const isXwall = (ry === Math.PI/2 || ry === -Math.PI/2);
-        const geo = new THREE.PlaneGeometry(isXwall ? d : w, h);
-        const m = new THREE.Mesh(geo, wallMat); m.position.set(x,y,z); m.rotation.y = ry; scene.add(m);
-    });
-    // Подсветка
-    const l = new THREE.PointLight(0xb0c8d8, 0.2, 30);
-    l.position.set(cx, h-1, cz); scene.add(l);
-}
-
-function buildRoom_Kitchen(x0, z0, x1, z1, h, floorMat, ceilMat, wallMat) {
-    const w = x1 - x0, d = Math.abs(z1 - z0);
-    const cx = (x0+x1)/2, cz = (z0+z1)/2;
-    const roomFloor = new THREE.Mesh(new THREE.PlaneGeometry(w, d), floorMat);
-    roomFloor.rotation.x = -Math.PI/2; roomFloor.position.set(cx, 0, cz); scene.add(roomFloor);
-    const roomCeil = new THREE.Mesh(new THREE.PlaneGeometry(w, d), ceilMat);
-    roomCeil.rotation.x = Math.PI/2; roomCeil.position.set(cx, h, cz); scene.add(roomCeil);
-    const minZ = Math.min(z0,z1), maxZ = Math.max(z0,z1);
-    [[cx, h/2, minZ, 0], [cx, h/2, maxZ, Math.PI],
-     [x0, h/2, cz, Math.PI/2], [x1, h/2, cz, -Math.PI/2]].forEach(([x,y,z,ry]) => {
-        const isXwall = (ry === Math.PI/2 || ry === -Math.PI/2);
-        const geo = new THREE.PlaneGeometry(isXwall ? d : w, h);
-        const m = new THREE.Mesh(geo, wallMat); m.position.set(x,y,z); m.rotation.y = ry; scene.add(m);
-    });
-    const l = new THREE.PointLight(0xd4c8a0, 0.25, 35);
-    l.position.set(cx, h-1, cz); scene.add(l);
-}
-
-function buildRoom_Bedroom(x0, z0, x1, z1, h, floorMat, ceilMat, wallMat) {
-    const w = x1 - x0, d = Math.abs(z1 - z0);
-    const cx = (x0+x1)/2, cz = (z0+z1)/2;
-    const roomFloor = new THREE.Mesh(new THREE.PlaneGeometry(w, d), floorMat);
-    roomFloor.rotation.x = -Math.PI/2; roomFloor.position.set(cx, 0, cz); scene.add(roomFloor);
-    const roomCeil = new THREE.Mesh(new THREE.PlaneGeometry(w, d), ceilMat);
-    roomCeil.rotation.x = Math.PI/2; roomCeil.position.set(cx, h, cz); scene.add(roomCeil);
-    const minZ = Math.min(z0,z1), maxZ = Math.max(z0,z1);
-    [[cx, h/2, minZ, 0], [cx, h/2, maxZ, Math.PI],
-     [x0, h/2, cz, Math.PI/2], [x1, h/2, cz, -Math.PI/2]].forEach(([x,y,z,ry]) => {
-        const isXwall = (ry === Math.PI/2 || ry === -Math.PI/2);
-        const geo = new THREE.PlaneGeometry(isXwall ? d : w, h);
-        const m = new THREE.Mesh(geo, wallMat); m.position.set(x,y,z); m.rotation.y = ry; scene.add(m);
-    });
-    const l = new THREE.PointLight(0xb0a090, 0.2, 35);
-    l.position.set(cx, h-1, cz); scene.add(l);
 }
 
 function updateClockTexture(timeStr) {
@@ -2060,18 +1841,9 @@ function handleInteraction() {
             }
             playClickSound();
         }
-    } else if (target.userData.type === 'door_locked') {
-        showEventText('🔒 Заперто...', 1.5);
-        playClickSound();
     } else if (target.userData.type === 'door') {
-        if (horrorState.phase >= 2 && !mainDoorOpen) {
-            triggerDeath('door');
-            return;
-        }
-        mainDoorOpen = !mainDoorOpen;
-        mainDoorTargetAngle = mainDoorOpen ? -Math.PI * 0.75 : 0;
-        playClickSound();
-        showEventText(mainDoorOpen ? '🚪 Дверь открыта' : '🚪 Дверь закрыта', 1.5);
+        if (horrorState.phase >= 2) triggerDeath('door');
+        else showEventText('🚪 Дверь заперта...', 2);
     } else if (target.userData.type === 'bed') {
         camera.position.set(bedMesh.position.x, 0.3, bedMesh.position.z);
         horrorState.isUnderBed = true;
